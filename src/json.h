@@ -31,6 +31,21 @@ enum class ValueType {object, array, number, string, literal_name};
 
 // Strings open and close with DOUBLE quotes.
 const char STRING_QUOTES = '"';
+// Backslash can be used for escaping.
+const char BACKSLASH = '\\';
+// Valid escape characters.
+static std::map<char, char> ESCAPE_CHARS = {
+    {'"', '"'}, // Quotation mark
+    {'\\', '\\'}, // Reverse solidus
+    {'/', '/'}, // Solidus
+    {'b', 0x08}, // Backspace
+    {'f', 0x0C}, // Form feed
+    {'n', 0x0A}, // Line feed (new line)
+    {'r', 0x0D}, // Carriage return
+    {'t', 0x09} // Tab
+};
+// Unicode escape is u followed by 4 hex digits.
+const char UNICODE_ESCAPE = 'u';
 
 // Numbers/exponents may start with a minus sign.
 const char MINUS_SIGN = '-';

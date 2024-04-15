@@ -193,8 +193,99 @@ ValuePtr parse_number(const std::string& string, int& i) {
 }
 
 
+// Fill UTF-8 byte with bit values (not the hard-coded constant bits).
+// Mutates the byte (fills it in) and code point (discards LSB per iteration).
+inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
+    for (int _ = 0; _ < count; ++_) {
+        byte = (byte << 1) + (code_point & 1);
+        code_point >>= 1;
+    }
+}
+
+
 ValuePtr parse_string(const std::string& string, int& i) {
     i++; // Opening double quote.
+    std::string* result = new std::string;
+    bool escape = false;
+    bool unicode_escape = false;
+    int unicode_code_point = 0;
+    int unicode_escape_chars = 0;
+    for (; i < string.size(); ++i) {
+        char c = string[i];
+        if (unicode_escape) {
+            // Handles Unicode escape character (\uXXXX).
+            if (!isxdigit(c)) {
+                // Not valid hex character.
+                throw;
+            }
+            c = toupper(c);
+            int decimal_value = (c >= 'A') ? (c - 'A' + 10) : (c - '0');
+            unicode_code_point = (unicode_code_point * 16) + decimal_value;
+            unicode_escape_chars++;
+            if (unicode_escape_chars == 4) {
+                // Done with the Unicode escape character.
+                // Convert into sequence of UTF-8 bytes.
+                // Only need to consider 1-3 bytes since range
+                // of Basic Multilingual Plane is [0, 0xFFFF].
+                if (unicode_code_point <= 0x007F) {
+                    // Just normal ASCII character - no special stuff.
+                    result->push_back(unicode_code_point);
+                } else if (unicode_code_point <= 0x07FF) {
+                    // Two bytes: 110xxxxx 10xxxxxx
+                    unsigned char byte1 = 0;
+                    unsigned char byte2 = 0;
+                    fill_utf8_byte(byte2, unicode_code_point, 6);
+                    fill_utf8_byte(byte1, unicode_code_point, 5);
+                    byte1 |= 0b11000000;
+                    byte2 |= 0b10000000;
+                    result->append({char(byte1), char(byte2)});
+                } else {
+                    // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
+                    unsigned char byte1 = 0;
+                    unsigned char byte2 = 0;
+                    unsigned char byte3 = 0;
+                    fill_utf8_byte(byte3, unicode_code_point, 6);
+                    fill_utf8_byte(byte2, unicode_code_point, 6);
+                    fill_utf8_byte(byte1, unicode_code_point, 4);
+                    byte1 |= 0b11100000;
+                    byte2 |= 0b10000000;
+                    byte3 |= 0b10000000;
+                    result->append({char(byte1), char(byte2), char(byte3)});
+                }
+                unicode_escape = false;
+                unicode_code_point = 0;
+                unicode_escape_chars = 0;
+            }
+        } else if (escape) {
+            // Handle escape character without yet knowing what is to come.
+            if (ESCAPE_CHARS.count(c)) {
+                result->push_back(ESCAPE_CHARS[c]);
+            } else if (c == UNICODE_ESCAPE) {
+                unicode_escape = true;
+                escape = false;
+            } else {
+                // Invalid escape character.
+                throw;
+            }
+            escape = false; // Either escape character done, or transfer control to Unicode escape.
+        } else {
+            // Handle normal character.
+            switch (c) {
+                case STRING_QUOTES:
+                    // The string has been closed.
+                    return std::make_unique<Value>(ValueType::string, result);
+                case BACKSLASH:
+                    // Start of an escaped character.
+                    escape = true;
+                    break;
+                default:
+                    // Just a normal character - append.
+                    result->push_back(c);
+            }
+        }
+    }
+    // End of JSON without closing double quote - erroneous.
+    throw;
 }
 
 

@@ -5,6 +5,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 
@@ -80,6 +81,7 @@ class Value {
         ValueType type() const;
         const void* const value() const;
         virtual const ValuePtr& operator[](std::size_t) const;
+        virtual const ValuePtr& operator[](const std::string&) const;
 };
 
 // Represents a JSON array, storing an ordered sequence of
@@ -89,8 +91,17 @@ class Array : public Value {
     const ValuePtr& operator[](std::size_t) const override;
 };
 
+// Represents a JSON object, storing an unordered associative
+// array of unique string keys and heterogeneous values.
+class Object : public Value {
+    using Value::Value;
+    const ValuePtr& operator[](const std::string&) const override;
+};
+
 // The internal representation of a JSON array of values.
 typedef std::vector<ValuePtr> ValueArray;
+// The internal representation of a JSON object of keys and values.
+typedef std::unordered_map<std::string, ValuePtr> ValueObject;
 
 // Parses a string object representing the JSON data.
 // Will raise an exception if the JSON data is invalid.

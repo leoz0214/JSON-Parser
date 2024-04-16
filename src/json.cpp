@@ -21,10 +21,46 @@ const ValuePtr& Value::operator[](std::size_t pos) const {
     throw;
 }
 
+const ValuePtr& Value::operator[](const std::string& key) const {
+    // Cannot use string key operator by default.
+    throw;
+}
+
 
 const ValuePtr& Array::operator[](std::size_t pos) const {
     // Arrays can logically have elements accessed by index.
     return ((ValueArray*)(this->value()))->operator[](pos);
+}
+
+
+const ValuePtr& Object::operator[](const std::string& key) const {
+    // Objects can logically have their values accessed by key.
+    return ((ValueObject*)(this->value()))->operator[](key);
+}
+
+
+// Parse any JSON value. It could be a number, string, literal, array or object.
+inline ValuePtr parse_value(const std::string& string, int& i) {
+    char c = string[i];
+    if (STRUCTURAL_CHARS.count(c)) {
+        // In this context, either array/object opening is expected.
+        // Anything else is erroneous.
+        switch (STRUCTURAL_CHARS[c]) {
+            case Structural::begin_array:
+                return parse_array(string, i);
+            case Structural::begin_object:
+                return parse_object(string, i);
+            default:
+                throw;
+        }
+    }
+    if (c == STRING_QUOTES) {
+        return parse_string(string, i);
+    } else if (c == MINUS_SIGN || isdigit(c)) {
+        return parse_number(string, i);
+    }
+    // It can be nothing else - either literal name or invalid.
+    return parse_literal_name(string, i);
 }
 
 
@@ -53,35 +89,15 @@ ValuePtr parse_array(const std::string& string, int& i) {
                     throw;
             }
         }
-        if (STRUCTURAL_CHARS.count(c)) {
-            // Allow opening of array, object, or closing or array
-            // Only allow comma if expected (not expecting a value).
-            switch (STRUCTURAL_CHARS[c]) {
-                case Structural::begin_array:
-                    array->push_back(parse_array(string, i));
-                    break;
-                case Structural::begin_object:
-                    array->push_back(parse_object(string, i));
-                    break;
-                case Structural::end_array:
-                    // Just had a comma.
-                    // Must not end on comma, but array can be empty.
-                    if (!array->empty()) {
-                        throw;
-                    }
-                    return std::make_unique<Array>(ValueType::array, array);
-                default:
-                    // Not expecting any other structural character at this time.
-                    throw;
+        if (STRUCTURAL_CHARS.count(c) && STRUCTURAL_CHARS[c] == Structural::end_array) {
+            // Just had a comma.
+            // Must not end on comma, but array can be empty.
+            if (!array->empty()) {
+                throw;
             }
-        } else if (c == STRING_QUOTES) {
-            array->push_back(parse_string(string, i));
-        } else if (c == MINUS_SIGN || isdigit(c)) {
-            array->push_back(parse_number(string, i));
-        } else {
-            // Can only be a literal, or complete nonsense otherwise.
-            array->push_back(parse_literal_name(string, i));
+            return std::make_unique<Array>(ValueType::array, array);
         }
+        array->push_back(parse_value(string, i));
         expecting_comma = true;
     }
     // End of string reached without array closure.
@@ -90,7 +106,65 @@ ValuePtr parse_array(const std::string& string, int& i) {
 
 
 ValuePtr parse_object(const std::string& string, int& i) {
-    i++;
+    i++; // Opening curly bracket is known.
+    ValueObject* object = new ValueObject;
+    enum ParsingPart {Name, Colon, Value, Comma};
+    ParsingPart parsing_part = Name;
+    std::string* key;
+    for (; i < string.size(); ++i) {
+        char c = string[i];
+        if (WHITESPACE.count(c)) {
+            continue;
+        }
+        switch (parsing_part) {
+            case Name:
+                // Allow for potential empty object.
+                if (object->empty() && STRUCTURAL_CHARS.count(c)) {
+                    if (STRUCTURAL_CHARS[c] == Structural::end_object) {
+                        // End of object successfully reached.
+                        return std::make_unique<Object>(ValueType::object, object);
+                    }
+                }  else if (c == STRING_QUOTES) {
+                    // Deduce string key, ensuring not duplicate.
+                    // Retain it to map it to the corresponding value to come.
+                    key = (std::string*)(parse_string(string, i)->value());
+                    if (object->count(*key)) {
+                        // Duplicate key, typically disallowed in JSON.
+                        throw;
+                    }
+                } else {
+                    throw;
+                }
+                break;
+            case Colon:
+                if (!STRUCTURAL_CHARS.count(c) || STRUCTURAL_CHARS[c] != Structural::name_separator) {
+                    // Not a colon as expected.
+                    throw;
+                }
+                break;
+            case Value:
+                object->operator[](*key) = parse_value(string, i);
+                break;
+            case Comma:
+                if (!STRUCTURAL_CHARS.count(c)) {
+                    throw;
+                }
+                switch (STRUCTURAL_CHARS[c]) {
+                    case Structural::end_object:
+                        // Object ends here instead of another comma.
+                        return std::make_unique<Object>(ValueType::object, object);
+                    case Structural::value_separator:
+                        break;
+                    default:
+                        throw;
+                }
+                break;
+        }
+        // To the next parsing part, cycling back to Name after Comma.
+        parsing_part = (ParsingPart)((parsing_part + 1) % 4);
+    }
+    // End of string reached without object closure.
+    throw;
 }
 
 
@@ -318,8 +392,7 @@ ValuePtr parse_literal_name(const std::string& string, int& i) {
 ValuePtr parse_json(const std::string& string) {
     ValuePtr result = nullptr;
     for (int i = 0; i < string.size(); ++i) {
-        char c = string[i];
-        if (WHITESPACE.count(c)) {
+        if (WHITESPACE.count(string[i])) {
             // Ignore insignificant whitespace.
             continue;
         }
@@ -327,29 +400,7 @@ ValuePtr parse_json(const std::string& string) {
             // Cannot have second part of the toplevel data... error
             throw;
         }
-        if (STRUCTURAL_CHARS.count(c)) {
-            // In this context, either array/object opening is expected.
-            // Anything else is erroneous.
-            switch (STRUCTURAL_CHARS[c]) {
-                case Structural::begin_array:
-                    result = parse_array(string, i);
-                    break;
-                case Structural::begin_object:
-                    result = parse_object(string, i);
-                    break;
-                default:
-                    throw;
-            }
-            continue;
-        }
-        if (c == STRING_QUOTES) {
-            result = parse_string(string, i);
-        } else if (c == MINUS_SIGN || isdigit(c)) {
-            result = parse_number(string, i);
-        } else {
-            // It can be nothing else - either literal name or invalid.
-            result = parse_literal_name(string, i);
-        }
+        result = parse_value(string, i);
     }
     if (result == nullptr) {
         // Nothing found but whitespace.

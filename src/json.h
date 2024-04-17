@@ -1,6 +1,7 @@
 // Corresponding header file for the JSON parser implementation.
 #pragma once
 #include <cstdint>
+#include <istream>
 #include <map>
 #include <memory>
 #include <set>
@@ -103,21 +104,62 @@ typedef std::vector<ValuePtr> ValueArray;
 // The internal representation of a JSON object of keys and values.
 typedef std::unordered_map<std::string, ValuePtr> ValueObject;
 
+
+// Wraps a string or input stream (support both in the parser)
+// so that code repetition can be minimised with minimal performance penalty.
+class _DataWrapper {
+    public:
+        virtual char get() = 0;
+        virtual bool eof() = 0;
+        virtual _DataWrapper& operator++() = 0;
+        virtual _DataWrapper& operator--() = 0;
+};
+
+// Wraps string to be accessed and parsed.
+class _StrWrapper : public _DataWrapper {
+    private:
+        const std::string* data;
+        std::size_t index = 0;
+    public:
+        _StrWrapper(const std::string&);
+        char get() override;
+        bool eof() override;
+        _StrWrapper& operator++() override;
+        _StrWrapper& operator--() override;
+};
+
+// Wraps input stream to be accessed and parsed.
+class _IstreamWrapper : public _DataWrapper {
+    private:
+        std::istream* stream;
+        std::size_t initial_pos;
+        std::size_t pos;
+    public:
+        _IstreamWrapper(std::istream&);
+        char get() override;
+        bool eof() override;
+        _IstreamWrapper& operator++() override;
+        _IstreamWrapper& operator--() override;
+};
+
+
 // Parses a string object representing the JSON data.
 // Will raise an exception if the JSON data is invalid.
+ValuePtr parse_json(_DataWrapper&);
 ValuePtr parse_json(const std::string&);
+ValuePtr parse_json(std::istream&);
 
 // Parses a JSON array.
-ValuePtr parse_array(const std::string&, int&);
+ValuePtr parse_array(_DataWrapper&);
 
 // Parses a JSON object.
-ValuePtr parse_object(const std::string&, int&);
+ValuePtr parse_object(_DataWrapper&);
 
 // Parses a JSON number.
-ValuePtr parse_number(const std::string&, int&);
+ValuePtr parse_number(_DataWrapper&);
 
 // Parses a JSON string literal (not the JSON string itself).
-ValuePtr parse_string(const std::string&, int&);
+ValuePtr parse_string(_DataWrapper&);
 
 // Parses a JSON literal name (true, false or null).
-ValuePtr parse_literal_name(const std::string&, int&);
+ValuePtr parse_literal_name(_DataWrapper&);

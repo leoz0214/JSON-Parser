@@ -39,37 +39,105 @@ const ValuePtr& Object::operator[](const std::string& key) const {
 }
 
 
+_StrWrapper::_StrWrapper(const std::string& data) {
+    this->data = &data;
+}
+
+char _StrWrapper::get() {
+    if (this->eof()) {
+        throw;
+    }
+    return this->data->at(this->index);
+}
+
+bool _StrWrapper::eof() {
+    return this->index == this->data->size();
+}
+
+_StrWrapper& _StrWrapper::operator++() {
+    if (this->eof()) {
+        throw;
+    }
+    this->index++;
+    return *this;
+}
+
+_StrWrapper& _StrWrapper::operator--() {
+    if (this->index == 0) {
+        throw;
+    }
+    this->index--;
+    return *this;
+}
+
+
+_IstreamWrapper::_IstreamWrapper(std::istream& istream) {
+    this->stream = &istream;
+    this->initial_pos = istream.tellg();
+    this->pos = this->initial_pos;
+}
+
+char _IstreamWrapper::get() {
+    if (this->eof()) {
+        throw;
+    }
+    return this->stream->peek();
+}
+
+bool _IstreamWrapper::eof() {
+    return this->stream->peek() == EOF;
+}
+
+_IstreamWrapper& _IstreamWrapper::operator++() {
+    if (this->eof()) {
+        throw;
+    }
+    pos++;
+    this->stream->get();
+    return *this;
+}
+
+_IstreamWrapper& _IstreamWrapper::operator--() {
+    if (this->pos == this->initial_pos) {
+        throw;
+    }
+    pos--;
+    this->stream->unget();
+    return *this;
+}
+
+
 // Parse any JSON value. It could be a number, string, literal, array or object.
-inline ValuePtr parse_value(const std::string& string, int& i) {
-    char c = string[i];
+inline ValuePtr parse_value(_DataWrapper& data) {
+    char c = data.get();
     if (STRUCTURAL_CHARS.count(c)) {
         // In this context, either array/object opening is expected.
         // Anything else is erroneous.
         switch (STRUCTURAL_CHARS[c]) {
             case Structural::begin_array:
-                return parse_array(string, i);
+                return parse_array(data);
             case Structural::begin_object:
-                return parse_object(string, i);
+                return parse_object(data);
             default:
                 throw;
         }
     }
     if (c == STRING_QUOTES) {
-        return parse_string(string, i);
+        return parse_string(data);
     } else if (c == MINUS_SIGN || isdigit(c)) {
-        return parse_number(string, i);
+        return parse_number(data);
     }
     // It can be nothing else - either literal name or invalid.
-    return parse_literal_name(string, i);
+    return parse_literal_name(data);
 }
 
 
-ValuePtr parse_array(const std::string& string, int& i) {
-    i++; // Opening square bracket is known.
+ValuePtr parse_array(_DataWrapper& data) {
+    ++data; // Opening square bracket is known.
     ValueArray* array = new ValueArray;
     bool expecting_comma = false;
-    for (; i < string.size(); ++i) {
-        char c = string[i];
+    for (; !data.eof(); ++data) {
+        char c = data.get();
         if (WHITESPACE.count(c)) {
             continue;
         }
@@ -97,7 +165,7 @@ ValuePtr parse_array(const std::string& string, int& i) {
             }
             return std::make_unique<Array>(ValueType::array, array);
         }
-        array->push_back(parse_value(string, i));
+        array->push_back(parse_value(data));
         expecting_comma = true;
     }
     // End of string reached without array closure.
@@ -105,14 +173,14 @@ ValuePtr parse_array(const std::string& string, int& i) {
 }
 
 
-ValuePtr parse_object(const std::string& string, int& i) {
-    i++; // Opening curly bracket is known.
+ValuePtr parse_object(_DataWrapper& data) {
+    ++data; // Opening curly bracket is known.
     ValueObject* object = new ValueObject;
     enum ParsingPart {Name, Colon, Value, Comma};
     ParsingPart parsing_part = Name;
     std::string* key;
-    for (; i < string.size(); ++i) {
-        char c = string[i];
+    for (; !data.eof(); ++data) {
+        char c = data.get();
         if (WHITESPACE.count(c)) {
             continue;
         }
@@ -127,7 +195,7 @@ ValuePtr parse_object(const std::string& string, int& i) {
                 }  else if (c == STRING_QUOTES) {
                     // Deduce string key, ensuring not duplicate.
                     // Retain it to map it to the corresponding value to come.
-                    key = (std::string*)(parse_string(string, i)->value());
+                    key = (std::string*)(parse_string(data)->value());
                     if (object->count(*key)) {
                         // Duplicate key, typically disallowed in JSON.
                         throw;
@@ -143,7 +211,7 @@ ValuePtr parse_object(const std::string& string, int& i) {
                 }
                 break;
             case Value:
-                object->operator[](*key) = parse_value(string, i);
+                object->operator[](*key) = parse_value(data);
                 break;
             case Comma:
                 if (!STRUCTURAL_CHARS.count(c)) {
@@ -168,11 +236,11 @@ ValuePtr parse_object(const std::string& string, int& i) {
 }
 
 
-ValuePtr parse_number(const std::string& string, int& i) {
+ValuePtr parse_number(_DataWrapper& data) {
     // Optional minus sign.
-    bool negative = string[i] == MINUS_SIGN;
+    bool negative = data.get() == MINUS_SIGN;
     if (negative) {
-        i++;
+        ++data;
     }
     double integer_part = 0;
     double fractional_part = 0;
@@ -186,8 +254,8 @@ ValuePtr parse_number(const std::string& string, int& i) {
     bool exponent_seen = false;
     bool exponent_empty = true;
     bool exponent_negative = false;
-    for (; i < string.size(); ++i) {
-        char c = string[i];
+    for (; !data.eof(); ++data) {
+        char c = data.get();
         switch (parsing_part) {
             case Integer:
                 // Possible chars: ., 0-9 (0 not first), e, E
@@ -245,7 +313,7 @@ ValuePtr parse_number(const std::string& string, int& i) {
     }
     end_of_number:
     // Decrement so that the current unknown char can be handled in parent scope.
-    i--;
+    --data;
     // Integer part must not be empty.
     // Decimal point must be followed by one or more digits.
     // If 'e' is seen, it must be followed by one or more digits.
@@ -277,15 +345,15 @@ inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
 }
 
 
-ValuePtr parse_string(const std::string& string, int& i) {
-    i++; // Opening double quote.
+ValuePtr parse_string(_DataWrapper& data) {
+    ++data; // Opening double quote.
     std::string* result = new std::string;
     bool escape = false;
     bool unicode_escape = false;
     int unicode_code_point = 0;
     int unicode_escape_chars = 0;
-    for (; i < string.size(); ++i) {
-        char c = string[i];
+    for (; !data.eof(); ++data) {
+        char c = data.get();
         if (unicode_escape) {
             // Handles Unicode escape character (\uXXXX).
             if (!isxdigit(c)) {
@@ -363,10 +431,10 @@ ValuePtr parse_string(const std::string& string, int& i) {
 }
 
 
-ValuePtr parse_literal_name(const std::string& string, int& i) {
+ValuePtr parse_literal_name(_DataWrapper& data) {
     std::string literal_name = "";
-    for (; i < string.size(); ++i) {
-        literal_name += string[i];
+    for (; !data.eof(); ++data) {
+        literal_name += data.get();
         if (literal_name.size() > 5) {
             // false is the longest literal, if still going, invalid...
             throw;
@@ -389,10 +457,10 @@ ValuePtr parse_literal_name(const std::string& string, int& i) {
 }
 
 
-ValuePtr parse_json(const std::string& string) {
+ValuePtr parse_json(_DataWrapper& data) {
     ValuePtr result = nullptr;
-    for (int i = 0; i < string.size(); ++i) {
-        if (WHITESPACE.count(string[i])) {
+    for (; !data.eof(); ++data) {
+        if (WHITESPACE.count(data.get())) {
             // Ignore insignificant whitespace.
             continue;
         }
@@ -400,11 +468,23 @@ ValuePtr parse_json(const std::string& string) {
             // Cannot have second part of the toplevel data... error
             throw;
         }
-        result = parse_value(string, i);
+        result = parse_value(data);
     }
     if (result == nullptr) {
         // Nothing found but whitespace.
         throw;
     }
     return result;
+}
+
+
+ValuePtr parse_json(const std::string& string) {
+    _StrWrapper wrapper(string);
+    return parse_json(wrapper);
+}
+
+
+ValuePtr parse_json(std::istream& istream) {
+    _IstreamWrapper wrapper(istream);
+    return parse_json(wrapper);
 }

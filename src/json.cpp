@@ -26,6 +26,29 @@ const ValuePtr& Value::operator[](const std::string& key) const {
     throw;
 }
 
+Value::~Value() {
+    if (this->value() == nullptr) {
+        return;
+    }
+    switch (this->type()) {
+        case ValueType::object:
+            delete (ValueObject*)(this->value());
+            break;
+        case ValueType::array:
+            delete (ValueArray*)(this->value());
+            break;
+        case ValueType::number:
+            delete (double*)(this->value());
+            break;
+        case ValueType::string:
+            delete (std::string*)(this->value());
+            break;
+        case ValueType::literal_name:
+            delete (bool*)(this->value());
+            break;
+    }
+}
+
 
 const ValuePtr& Array::operator[](std::size_t pos) const {
     // Arrays can logically have elements accessed by index.
@@ -178,7 +201,7 @@ ValuePtr parse_object(_DataWrapper& data) {
     ValueObject* object = new ValueObject;
     enum ParsingPart {Name, Colon, Value, Comma};
     ParsingPart parsing_part = Name;
-    std::string* key;
+    std::string key;
     for (; !data.eof(); ++data) {
         char c = data.get();
         if (WHITESPACE.count(c)) {
@@ -195,8 +218,8 @@ ValuePtr parse_object(_DataWrapper& data) {
                 }  else if (c == STRING_QUOTES) {
                     // Deduce string key, ensuring not duplicate.
                     // Retain it to map it to the corresponding value to come.
-                    key = (std::string*)(parse_string(data)->value());
-                    if (object->count(*key)) {
+                    key = *(std::string*)(parse_string(data)->value());
+                    if (object->count(key)) {
                         // Duplicate key, typically disallowed in JSON.
                         throw;
                     }
@@ -211,7 +234,7 @@ ValuePtr parse_object(_DataWrapper& data) {
                 }
                 break;
             case Value:
-                object->operator[](*key) = parse_value(data);
+                object->operator[](key) = parse_value(data);
                 break;
             case Comma:
                 if (!STRUCTURAL_CHARS.count(c)) {

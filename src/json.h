@@ -83,6 +83,7 @@ class Value {
         const void* const value() const;
         virtual const ValuePtr& operator[](std::size_t) const;
         virtual const ValuePtr& operator[](const std::string&) const;
+        ~Value();
 };
 
 // Represents a JSON array, storing an ordered sequence of
@@ -156,10 +157,10 @@ ValuePtr parse_array(_DataWrapper&);
 ValuePtr parse_object(_DataWrapper&);
 
 // Parses a JSON number.
-ValuePtr parse_number(_DataWrapper&);
+inline ValuePtr parse_number(_DataWrapper&);
 
 // Parses a JSON string literal (not the JSON string itself).
-ValuePtr parse_string(_DataWrapper&);
+inline ValuePtr parse_string(_DataWrapper&);
 
 // Parses a JSON literal name (true, false or null).
-ValuePtr parse_literal_name(_DataWrapper&);
+inline ValuePtr parse_literal_name(_DataWrapper&);

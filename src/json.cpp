@@ -3,65 +3,6 @@
 #include "json.h"
 
 
-Value::Value(ValueType type, void* value) {
-    this->_type = type;
-    this->_value = value;
-}
-
-ValueType Value::type() const {
-    return this->_type;
-}
-
-const void* const Value::value() const {
-    return this->_value;
-}
-
-const ValuePtr& Value::operator[](std::size_t pos) const {
-    // By default, cannot use array index. Erroneous to do so.
-    throw;
-}
-
-const ValuePtr& Value::operator[](const std::string& key) const {
-    // Cannot use string key operator by default.
-    throw;
-}
-
-Value::~Value() {
-    if (this->value() == nullptr) {
-        return;
-    }
-    switch (this->type()) {
-        case ValueType::object:
-            delete (ValueObject*)(this->value());
-            break;
-        case ValueType::array:
-            delete (ValueArray*)(this->value());
-            break;
-        case ValueType::number:
-            delete (double*)(this->value());
-            break;
-        case ValueType::string:
-            delete (std::string*)(this->value());
-            break;
-        case ValueType::literal_name:
-            delete (bool*)(this->value());
-            break;
-    }
-}
-
-
-const ValuePtr& Array::operator[](std::size_t pos) const {
-    // Arrays can logically have elements accessed by index.
-    return ((ValueArray*)(this->value()))->operator[](pos);
-}
-
-
-const ValuePtr& Object::operator[](const std::string& key) const {
-    // Objects can logically have their values accessed by key.
-    return ((ValueObject*)(this->value()))->operator[](key);
-}
-
-
 _StrWrapper::_StrWrapper(const std::string& data) {
     this->data = &data;
 }
@@ -131,7 +72,7 @@ _IstreamWrapper& _IstreamWrapper::operator--() {
 
 
 // Parse any JSON value. It could be a number, string, literal, array or object.
-inline ValuePtr parse_value(_DataWrapper& data) {
+inline Value parse_value(_DataWrapper& data) {
     char c = data.get();
     if (STRUCTURAL_CHARS.count(c)) {
         // In this context, either array/object opening is expected.
@@ -155,9 +96,9 @@ inline ValuePtr parse_value(_DataWrapper& data) {
 }
 
 
-ValuePtr parse_array(_DataWrapper& data) {
+Value parse_array(_DataWrapper& data) {
     ++data; // Opening square bracket is known.
-    ValueArray* array = new ValueArray;
+    ValueArray array;
     bool expecting_comma = false;
     for (; !data.eof(); ++data) {
         char c = data.get();
@@ -175,7 +116,7 @@ ValuePtr parse_array(_DataWrapper& data) {
                     continue;
                 case Structural::end_array:
                     // Alternatively, array can end here too.
-                    return std::make_unique<Array>(ValueType::array, array);
+                    return array;
                 default:
                     throw;
             }
@@ -183,12 +124,12 @@ ValuePtr parse_array(_DataWrapper& data) {
         if (STRUCTURAL_CHARS.count(c) && STRUCTURAL_CHARS[c] == Structural::end_array) {
             // Just had a comma.
             // Must not end on comma, but array can be empty.
-            if (!array->empty()) {
+            if (!array.empty()) {
                 throw;
             }
-            return std::make_unique<Array>(ValueType::array, array);
+            return array;
         }
-        array->push_back(parse_value(data));
+        array.push_back(parse_value(data));
         expecting_comma = true;
     }
     // End of string reached without array closure.
@@ -196,12 +137,12 @@ ValuePtr parse_array(_DataWrapper& data) {
 }
 
 
-ValuePtr parse_object(_DataWrapper& data) {
+Value parse_object(_DataWrapper& data) {
     ++data; // Opening curly bracket is known.
-    ValueObject* object = new ValueObject;
+    ValueObject object;
     enum ParsingPart {Name, Colon, Value, Comma};
     ParsingPart parsing_part = Name;
-    std::string key;
+    ValueString key;
     for (; !data.eof(); ++data) {
         char c = data.get();
         if (WHITESPACE.count(c)) {
@@ -210,16 +151,16 @@ ValuePtr parse_object(_DataWrapper& data) {
         switch (parsing_part) {
             case Name:
                 // Allow for potential empty object.
-                if (object->empty() && STRUCTURAL_CHARS.count(c)) {
+                if (object.empty() && STRUCTURAL_CHARS.count(c)) {
                     if (STRUCTURAL_CHARS[c] == Structural::end_object) {
                         // End of object successfully reached.
-                        return std::make_unique<Object>(ValueType::object, object);
+                        return object;
                     }
                 }  else if (c == STRING_QUOTES) {
                     // Deduce string key, ensuring not duplicate.
                     // Retain it to map it to the corresponding value to come.
-                    key = *(std::string*)(parse_string(data)->value());
-                    if (object->count(key)) {
+                    key = std::get<ValueString>(parse_string(data));
+                    if (object.count(key)) {
                         // Duplicate key, typically disallowed in JSON.
                         throw;
                     }
@@ -234,7 +175,7 @@ ValuePtr parse_object(_DataWrapper& data) {
                 }
                 break;
             case Value:
-                object->operator[](key) = parse_value(data);
+                object[key] = parse_value(data);
                 break;
             case Comma:
                 if (!STRUCTURAL_CHARS.count(c)) {
@@ -243,7 +184,7 @@ ValuePtr parse_object(_DataWrapper& data) {
                 switch (STRUCTURAL_CHARS[c]) {
                     case Structural::end_object:
                         // Object ends here instead of another comma.
-                        return std::make_unique<Object>(ValueType::object, object);
+                        return object;
                     case Structural::value_separator:
                         break;
                     default:
@@ -259,7 +200,7 @@ ValuePtr parse_object(_DataWrapper& data) {
 }
 
 
-ValuePtr parse_number(_DataWrapper& data) {
+Value parse_number(_DataWrapper& data) {
     // Optional minus sign.
     bool negative = data.get() == MINUS_SIGN;
     if (negative) {
@@ -350,11 +291,11 @@ ValuePtr parse_number(_DataWrapper& data) {
     if (exponent_negative) {
         exponent = -exponent;
     }
-    double* number = new double((integer_part + fractional_part) * std::pow(10, exponent));
+    ValueNumber number = (integer_part + fractional_part) * std::pow(10, exponent);
     if (negative) {
-        *number = -*number;
+        number = -number;
     }
-    return std::make_unique<Value>(ValueType::number, number);
+    return number;
 }
 
 
@@ -368,9 +309,9 @@ inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
 }
 
 
-ValuePtr parse_string(_DataWrapper& data) {
+Value parse_string(_DataWrapper& data) {
     ++data; // Opening double quote.
-    std::string* result = new std::string;
+    ValueString result;
     bool escape = false;
     bool unicode_escape = false;
     int unicode_code_point = 0;
@@ -394,7 +335,7 @@ ValuePtr parse_string(_DataWrapper& data) {
                 // of Basic Multilingual Plane is [0, 0xFFFF].
                 if (unicode_code_point <= 0x007F) {
                     // Just normal ASCII character - no special stuff.
-                    result->push_back(unicode_code_point);
+                    result.push_back(unicode_code_point);
                 } else if (unicode_code_point <= 0x07FF) {
                     // Two bytes: 110xxxxx 10xxxxxx
                     unsigned char byte1 = 0;
@@ -403,7 +344,7 @@ ValuePtr parse_string(_DataWrapper& data) {
                     fill_utf8_byte(byte1, unicode_code_point, 5);
                     byte1 |= 0b11000000;
                     byte2 |= 0b10000000;
-                    result->append({char(byte1), char(byte2)});
+                    result.append({char(byte1), char(byte2)});
                 } else {
                     // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
                     unsigned char byte1 = 0;
@@ -415,7 +356,7 @@ ValuePtr parse_string(_DataWrapper& data) {
                     byte1 |= 0b11100000;
                     byte2 |= 0b10000000;
                     byte3 |= 0b10000000;
-                    result->append({char(byte1), char(byte2), char(byte3)});
+                    result.append({char(byte1), char(byte2), char(byte3)});
                 }
                 unicode_escape = false;
                 unicode_code_point = 0;
@@ -424,7 +365,7 @@ ValuePtr parse_string(_DataWrapper& data) {
         } else if (escape) {
             // Handle escape character without yet knowing what is to come.
             if (ESCAPE_CHARS.count(c)) {
-                result->push_back(ESCAPE_CHARS[c]);
+                result.push_back(ESCAPE_CHARS[c]);
             } else if (c == UNICODE_ESCAPE) {
                 unicode_escape = true;
                 escape = false;
@@ -438,14 +379,14 @@ ValuePtr parse_string(_DataWrapper& data) {
             switch (c) {
                 case STRING_QUOTES:
                     // The string has been closed.
-                    return std::make_unique<Value>(ValueType::string, result);
+                    return result;
                 case BACKSLASH:
                     // Start of an escaped character.
                     escape = true;
                     break;
                 default:
                     // Just a normal character - append.
-                    result->push_back(c);
+                    result.push_back(c);
             }
         }
     }
@@ -454,7 +395,7 @@ ValuePtr parse_string(_DataWrapper& data) {
 }
 
 
-ValuePtr parse_literal_name(_DataWrapper& data) {
+Value parse_literal_name(_DataWrapper& data) {
     std::string literal_name = "";
     for (; !data.eof(); ++data) {
         literal_name += data.get();
@@ -463,16 +404,13 @@ ValuePtr parse_literal_name(_DataWrapper& data) {
             throw;
         }
         if (LITERAL_NAMES.count(literal_name)) {
-            bool* result = nullptr;
             switch (LITERAL_NAMES[literal_name]) {
                 case LiteralName::true_:
-                    result = new bool(true);
-                    break;
+                    return true;
                 case LiteralName::false_:
-                    result = new bool(false);
-                    break;
+                    return false;
             }
-            return std::make_unique<Value>(ValueType::literal_name, result);
+            return ValueNull();
         }
     }
     // End of string reached without finding a literal.
@@ -480,20 +418,22 @@ ValuePtr parse_literal_name(_DataWrapper& data) {
 }
 
 
-ValuePtr parse_json(_DataWrapper& data) {
-    ValuePtr result = nullptr;
+Value parse_json(_DataWrapper& data) {
+    Value result;
+    bool parsed = false;
     for (; !data.eof(); ++data) {
         if (WHITESPACE.count(data.get())) {
             // Ignore insignificant whitespace.
             continue;
         }
-        if (result != nullptr) {
+        if (parsed) {
             // Cannot have second part of the toplevel data... error
             throw;
         }
         result = parse_value(data);
+        parsed = true;
     }
-    if (result == nullptr) {
+    if (!parsed) {
         // Nothing found but whitespace.
         throw;
     }
@@ -501,13 +441,13 @@ ValuePtr parse_json(_DataWrapper& data) {
 }
 
 
-ValuePtr parse_json(const std::string& string) {
+Value parse_json(const std::string& string) {
     _StrWrapper wrapper(string);
     return parse_json(wrapper);
 }
 
 
-ValuePtr parse_json(std::istream& istream) {
+Value parse_json(std::istream& istream) {
     _IstreamWrapper wrapper(istream);
     return parse_json(wrapper);
 }

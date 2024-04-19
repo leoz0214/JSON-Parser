@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <istream>
 #include <map>
-#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 
@@ -27,9 +27,6 @@ static std::map<char, Structural> STRUCTURAL_CHARS = {
 
 // Spaces, tabs, new lines, carriage return
 static std::set<char> WHITESPACE = {0x20, 0x09, 0x0A, 0x0D};
-
-// A JSON value MUST be an object, array, number, or string, or true/false/null
-enum class ValueType {object, array, number, string, literal_name};
 
 // Strings open and close with DOUBLE quotes.
 const char STRING_QUOTES = '"';
@@ -68,42 +65,25 @@ static std::map<std::string, LiteralName> LITERAL_NAMES = {
 
 
 class Value;
-// Wrap a dynamic JSON value in a memory-safe unique pointer.
-typedef std::unique_ptr<Value> ValuePtr;
-// Represents a JSON value. Will be polymorphic such that the type of
-// the value can be deduced at runtime, not compile-time.
-class Value {
-    private:
-        ValueType _type;
-        const void* _value;
-    public:
-        Value() = default;
-        Value(ValueType, void*);
-        ValueType type() const;
-        const void* const value() const;
-        virtual const ValuePtr& operator[](std::size_t) const;
-        virtual const ValuePtr& operator[](const std::string&) const;
-        ~Value();
-};
-
-// Represents a JSON array, storing an ordered sequence of
-// heterogeneous values (not a traditional array!).
-class Array : public Value {
-    using Value::Value;
-    const ValuePtr& operator[](std::size_t) const override;
-};
-
-// Represents a JSON object, storing an unordered associative
-// array of unique string keys and heterogeneous values.
-class Object : public Value {
-    using Value::Value;
-    const ValuePtr& operator[](const std::string&) const override;
-};
-
-// The internal representation of a JSON array of values.
-typedef std::vector<ValuePtr> ValueArray;
+// NULL
+typedef std::monostate ValueNull;
 // The internal representation of a JSON object of keys and values.
-typedef std::unordered_map<std::string, ValuePtr> ValueObject;
+typedef std::unordered_map<std::string, Value> ValueObject;
+// The internal representation of a JSON array of values.
+typedef std::vector<Value> ValueArray;
+// Represent JSON numbers in the following type.
+typedef double ValueNumber;
+// Represent JSON strings in the following type.
+typedef std::string ValueString;
+// Represent JSON booleans in the following type.
+typedef bool ValueBoolean;
+// Represent JSON value of any type (monostate -> null).
+class Value : public std::variant<
+    ValueNull, ValueObject, ValueArray, ValueNumber, ValueString, ValueBoolean
+> {
+    using std::variant<ValueNull, ValueObject, ValueArray, ValueNumber, ValueString, ValueBoolean
+>::variant;
+};
 
 
 // Wraps a string or input stream (support both in the parser)
@@ -146,21 +126,21 @@ class _IstreamWrapper : public _DataWrapper {
 
 // Parses a string object representing the JSON data.
 // Will raise an exception if the JSON data is invalid.
-ValuePtr parse_json(_DataWrapper&);
-ValuePtr parse_json(const std::string&);
-ValuePtr parse_json(std::istream&);
+Value parse_json(_DataWrapper&);
+Value parse_json(const std::string&);
+Value parse_json(std::istream&);
 
 // Parses a JSON array.
-ValuePtr parse_array(_DataWrapper&);
+Value parse_array(_DataWrapper&);
 
 // Parses a JSON object.
-ValuePtr parse_object(_DataWrapper&);
+Value parse_object(_DataWrapper&);
 
 // Parses a JSON number.
-inline ValuePtr parse_number(_DataWrapper&);
+inline Value parse_number(_DataWrapper&);
 
 // Parses a JSON string literal (not the JSON string itself).
-inline ValuePtr parse_string(_DataWrapper&);
+inline Value parse_string(_DataWrapper&);
 
 // Parses a JSON literal name (true, false or null).
-inline ValuePtr parse_literal_name(_DataWrapper&);
+inline Value parse_literal_name(_DataWrapper&);

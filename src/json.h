@@ -66,24 +66,24 @@ static std::map<std::string, LiteralName> LITERAL_NAMES = {
 
 class Value;
 // NULL
-typedef std::monostate ValueNull;
+typedef std::monostate Null;
 // The internal representation of a JSON object of keys and values.
-typedef std::unordered_map<std::string, Value> ValueObject;
+typedef std::unordered_map<std::string, Value> Object;
 // The internal representation of a JSON array of values.
-typedef std::vector<Value> ValueArray;
+typedef std::vector<Value> Array;
 // Represent JSON numbers in the following type.
-typedef double ValueNumber;
+typedef double Number;
 // Represent JSON strings in the following type.
-typedef std::string ValueString;
+typedef std::string String;
 // Represent JSON booleans in the following type.
-typedef bool ValueBoolean;
+typedef bool Boolean;
 // Represent JSON value of any type (monostate -> null).
-class Value : public std::variant<
-    ValueNull, ValueObject, ValueArray, ValueNumber, ValueString, ValueBoolean
-> {
-    using std::variant<ValueNull, ValueObject, ValueArray, ValueNumber, ValueString, ValueBoolean
->::variant;
+class Value : public std::variant<Null, Object, Array, Number, String, Boolean> {
+    using std::variant<Null, Object, Array, Number, String, Boolean>::variant;
 };
+
+// Shortcuts instead of verbose std::get<ValueType>
+// bool (*ToNull)(const Value&) = std::get<Null>;
 
 
 // Wraps a string or input stream (support both in the parser)
@@ -113,8 +113,6 @@ class _StrWrapper : public _DataWrapper {
 class _IstreamWrapper : public _DataWrapper {
     private:
         std::istream* stream;
-        std::size_t initial_pos;
-        std::size_t pos;
     public:
         _IstreamWrapper(std::istream&);
         char get() override;
@@ -122,7 +120,6 @@ class _IstreamWrapper : public _DataWrapper {
         _IstreamWrapper& operator++() override;
         _IstreamWrapper& operator--() override;
 };
-
 
 // Parses a string object representing the JSON data.
 // Will raise an exception if the JSON data is invalid.

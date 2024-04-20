@@ -8,10 +8,7 @@ _StrWrapper::_StrWrapper(const std::string& data) {
 }
 
 char _StrWrapper::get() {
-    if (this->eof()) {
-        throw;
-    }
-    return this->data->at(this->index);
+    return this->data->operator[](this->index);
 }
 
 bool _StrWrapper::eof() {
@@ -27,9 +24,6 @@ _StrWrapper& _StrWrapper::operator++() {
 }
 
 _StrWrapper& _StrWrapper::operator--() {
-    if (this->index == 0) {
-        throw;
-    }
     this->index--;
     return *this;
 }
@@ -37,14 +31,9 @@ _StrWrapper& _StrWrapper::operator--() {
 
 _IstreamWrapper::_IstreamWrapper(std::istream& istream) {
     this->stream = &istream;
-    this->initial_pos = istream.tellg();
-    this->pos = this->initial_pos;
 }
 
 char _IstreamWrapper::get() {
-    if (this->eof()) {
-        throw;
-    }
     return this->stream->peek();
 }
 
@@ -53,19 +42,11 @@ bool _IstreamWrapper::eof() {
 }
 
 _IstreamWrapper& _IstreamWrapper::operator++() {
-    if (this->eof()) {
-        throw;
-    }
-    pos++;
     this->stream->get();
     return *this;
 }
 
 _IstreamWrapper& _IstreamWrapper::operator--() {
-    if (this->pos == this->initial_pos) {
-        throw;
-    }
-    pos--;
     this->stream->unget();
     return *this;
 }
@@ -74,6 +55,12 @@ _IstreamWrapper& _IstreamWrapper::operator--() {
 // Parse any JSON value. It could be a number, string, literal, array or object.
 inline Value parse_value(_DataWrapper& data) {
     char c = data.get();
+    if (c == STRING_QUOTES) {
+        return parse_string(data);
+    }
+    if (c == MINUS_SIGN || isdigit(c)) {
+        return parse_number(data);
+    }
     if (STRUCTURAL_CHARS.count(c)) {
         // In this context, either array/object opening is expected.
         // Anything else is erroneous.
@@ -86,11 +73,6 @@ inline Value parse_value(_DataWrapper& data) {
                 throw;
         }
     }
-    if (c == STRING_QUOTES) {
-        return parse_string(data);
-    } else if (c == MINUS_SIGN || isdigit(c)) {
-        return parse_number(data);
-    }
     // It can be nothing else - either literal name or invalid.
     return parse_literal_name(data);
 }
@@ -98,7 +80,7 @@ inline Value parse_value(_DataWrapper& data) {
 
 Value parse_array(_DataWrapper& data) {
     ++data; // Opening square bracket is known.
-    ValueArray array;
+    Array array;
     bool expecting_comma = false;
     for (; !data.eof(); ++data) {
         char c = data.get();
@@ -139,10 +121,10 @@ Value parse_array(_DataWrapper& data) {
 
 Value parse_object(_DataWrapper& data) {
     ++data; // Opening curly bracket is known.
-    ValueObject object;
+    Object object;
     enum ParsingPart {Name, Colon, Value, Comma};
     ParsingPart parsing_part = Name;
-    ValueString key;
+    String key;
     for (; !data.eof(); ++data) {
         char c = data.get();
         if (WHITESPACE.count(c)) {
@@ -159,7 +141,7 @@ Value parse_object(_DataWrapper& data) {
                 }  else if (c == STRING_QUOTES) {
                     // Deduce string key, ensuring not duplicate.
                     // Retain it to map it to the corresponding value to come.
-                    key = std::get<ValueString>(parse_string(data));
+                    key = std::get<String>(parse_string(data));
                     if (object.count(key)) {
                         // Duplicate key, typically disallowed in JSON.
                         throw;
@@ -291,7 +273,7 @@ Value parse_number(_DataWrapper& data) {
     if (exponent_negative) {
         exponent = -exponent;
     }
-    ValueNumber number = (integer_part + fractional_part) * std::pow(10, exponent);
+    Number number = (integer_part + fractional_part) * std::pow(10, exponent);
     if (negative) {
         number = -number;
     }
@@ -302,8 +284,8 @@ Value parse_number(_DataWrapper& data) {
 // Fill UTF-8 byte with bit values (not the hard-coded constant bits).
 // Mutates the byte (fills it in) and code point (discards LSB per iteration).
 inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
-    for (int _ = 0; _ < count; ++_) {
-        byte = (byte << 1) + (code_point & 1);
+    for (int i = 0; i < count; ++i) {
+        byte |= (code_point & 1) << i;
         code_point >>= 1;
     }
 }
@@ -311,7 +293,7 @@ inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
 
 Value parse_string(_DataWrapper& data) {
     ++data; // Opening double quote.
-    ValueString result;
+    String result;
     bool escape = false;
     bool unicode_escape = false;
     int unicode_code_point = 0;
@@ -368,7 +350,6 @@ Value parse_string(_DataWrapper& data) {
                 result.push_back(ESCAPE_CHARS[c]);
             } else if (c == UNICODE_ESCAPE) {
                 unicode_escape = true;
-                escape = false;
             } else {
                 // Invalid escape character.
                 throw;
@@ -410,7 +391,7 @@ Value parse_literal_name(_DataWrapper& data) {
                 case LiteralName::false_:
                     return false;
             }
-            return ValueNull();
+            return Null();
         }
     }
     // End of string reached without finding a literal.

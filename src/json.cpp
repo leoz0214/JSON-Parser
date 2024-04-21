@@ -3,28 +3,42 @@
 #include "json.h"
 
 
+std::size_t  _DataWrapper::pos() {
+    return this->_pos;
+}
+
+void _DataWrapper::error(const std::string& what) {
+    throw JsonParseError(what);
+}
+
+void _DataWrapper::errorpos(const std::string& what, int pos) {
+    if (pos == -1) {
+        pos = this->pos();
+    }
+    std::string message = "Error at position " + std::to_string(pos) + ": " + what;
+    this->error(message);
+}
+
+
 _StrWrapper::_StrWrapper(const std::string& data) {
     this->data = &data;
 }
 
 char _StrWrapper::get() {
-    return this->data->operator[](this->index);
+    return this->data->operator[](this->_pos);
 }
 
 bool _StrWrapper::eof() {
-    return this->index == this->data->size();
+    return this->_pos == this->data->size();
 }
 
 _StrWrapper& _StrWrapper::operator++() {
-    if (this->eof()) {
-        throw;
-    }
-    this->index++;
+    this->_pos++;
     return *this;
 }
 
 _StrWrapper& _StrWrapper::operator--() {
-    this->index--;
+    this->_pos--;
     return *this;
 }
 
@@ -43,11 +57,13 @@ bool _IstreamWrapper::eof() {
 
 _IstreamWrapper& _IstreamWrapper::operator++() {
     this->stream->get();
+    this->_pos++;
     return *this;
 }
 
 _IstreamWrapper& _IstreamWrapper::operator--() {
     this->stream->unget();
+    this->_pos--;
     return *this;
 }
 
@@ -70,7 +86,7 @@ inline Value parse_value(_DataWrapper& data) {
             case Structural::begin_object:
                 return parse_object(data);
             default:
-                throw;
+                data.errorpos("Invalid structural character.");
         }
     }
     // It can be nothing else - either literal name or invalid.
@@ -89,7 +105,7 @@ Value parse_array(_DataWrapper& data) {
         }
         if (expecting_comma) {
             if (!STRUCTURAL_CHARS.count(c)) {
-                throw;
+                data.errorpos("Expected comma.");
             }
             switch (STRUCTURAL_CHARS[c]) {
                 case Structural::value_separator:
@@ -100,14 +116,14 @@ Value parse_array(_DataWrapper& data) {
                     // Alternatively, array can end here too.
                     return array;
                 default:
-                    throw;
+                    data.errorpos("Expected comma.");
             }
         }
         if (STRUCTURAL_CHARS.count(c) && STRUCTURAL_CHARS[c] == Structural::end_array) {
             // Just had a comma.
             // Must not end on comma, but array can be empty.
             if (!array.empty()) {
-                throw;
+                data.errorpos("Expected value.");
             }
             return array;
         }
@@ -115,7 +131,7 @@ Value parse_array(_DataWrapper& data) {
         expecting_comma = true;
     }
     // End of string reached without array closure.
-    throw;
+    data.errorpos("Array not closed.");
 }
 
 
@@ -141,19 +157,20 @@ Value parse_object(_DataWrapper& data) {
                 }  else if (c == STRING_QUOTES) {
                     // Deduce string key, ensuring not duplicate.
                     // Retain it to map it to the corresponding value to come.
+                    std::size_t key_start_pos = data.pos();
                     key = std::get<String>(parse_string(data));
                     if (object.count(key)) {
                         // Duplicate key, typically disallowed in JSON.
-                        throw;
+                        data.errorpos("Duplicate key disallowed.", key_start_pos);
                     }
                 } else {
-                    throw;
+                    data.errorpos("Expected string literal as object key.");
                 }
                 break;
             case Colon:
                 if (!STRUCTURAL_CHARS.count(c) || STRUCTURAL_CHARS[c] != Structural::name_separator) {
                     // Not a colon as expected.
-                    throw;
+                    data.errorpos("Expected colon.");
                 }
                 break;
             case Value:
@@ -161,7 +178,7 @@ Value parse_object(_DataWrapper& data) {
                 break;
             case Comma:
                 if (!STRUCTURAL_CHARS.count(c)) {
-                    throw;
+                    data.errorpos("Expected comma.");
                 }
                 switch (STRUCTURAL_CHARS[c]) {
                     case Structural::end_object:
@@ -170,20 +187,21 @@ Value parse_object(_DataWrapper& data) {
                     case Structural::value_separator:
                         break;
                     default:
-                        throw;
+                        data.errorpos("Expected comma.");
                 }
                 break;
         }
         // To the next parsing part, cycling back to Name after Comma.
         parsing_part = (ParsingPart)((parsing_part + 1) % 4);
     }
-    // End of string reached without object closure.
-    throw;
+    // End of JSON data reached without object closure.
+    data.errorpos("Object not closed.");
 }
 
 
 Value parse_number(_DataWrapper& data) {
     // Optional minus sign.
+    std::size_t start_pos = data.pos();
     bool negative = data.get() == MINUS_SIGN;
     if (negative) {
         ++data;
@@ -215,7 +233,7 @@ Value parse_number(_DataWrapper& data) {
                     }
                     if (leading_zero && !integer_part_empty) {
                         // Insignificant leading 0 is illegal.
-                        throw;
+                        data.errorpos("Insignifcant leading 0s disallowed.", start_pos);
                     }
                     integer_part = integer_part * 10 + (c - '0');
                     integer_part_empty = false;
@@ -268,7 +286,7 @@ Value parse_number(_DataWrapper& data) {
         || (decimal_point_seen && fractional_digits == 0)
         || (exponent_seen && exponent_empty)
     ) {
-        throw;
+        data.errorpos("Invalid number literal.", start_pos);
     }
     if (exponent_negative) {
         exponent = -exponent;
@@ -304,7 +322,7 @@ Value parse_string(_DataWrapper& data) {
             // Handles Unicode escape character (\uXXXX).
             if (!isxdigit(c)) {
                 // Not valid hex character.
-                throw;
+                data.errorpos("Invalid hex character in Unicode escape.");
             }
             c = toupper(c);
             int decimal_value = (c >= 'A') ? (c - 'A' + 10) : (c - '0');
@@ -352,7 +370,7 @@ Value parse_string(_DataWrapper& data) {
                 unicode_escape = true;
             } else {
                 // Invalid escape character.
-                throw;
+                data.errorpos("Invalid escape character.");
             }
             escape = false; // Either escape character done, or transfer control to Unicode escape.
         } else {
@@ -372,17 +390,18 @@ Value parse_string(_DataWrapper& data) {
         }
     }
     // End of JSON without closing double quote - erroneous.
-    throw;
+    data.errorpos("Unterminated string literal.");
 }
 
 
 Value parse_literal_name(_DataWrapper& data) {
     std::string literal_name = "";
+    std::size_t start_pos = data.pos();
     for (; !data.eof(); ++data) {
         literal_name += data.get();
         if (literal_name.size() > 5) {
             // false is the longest literal, if still going, invalid...
-            throw;
+            break;
         }
         if (LITERAL_NAMES.count(literal_name)) {
             switch (LITERAL_NAMES[literal_name]) {
@@ -395,7 +414,7 @@ Value parse_literal_name(_DataWrapper& data) {
         }
     }
     // End of string reached without finding a literal.
-    throw;
+    data.errorpos("Invalid literal.", start_pos);
 }
 
 
@@ -409,14 +428,14 @@ Value parse_json(_DataWrapper& data) {
         }
         if (parsed) {
             // Cannot have second part of the toplevel data... error
-            throw;
+            data.error(INVALID_JSON_DATA);
         }
         result = parse_value(data);
         parsed = true;
     }
     if (!parsed) {
         // Nothing found but whitespace.
-        throw;
+        data.error(INVALID_JSON_DATA);
     }
     return result;
 }

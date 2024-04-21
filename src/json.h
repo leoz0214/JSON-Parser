@@ -4,6 +4,7 @@
 #include <istream>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -89,11 +90,16 @@ class Value : public std::variant<Null, Object, Array, Number, String, Boolean> 
 // Wraps a string or input stream (support both in the parser)
 // so that code repetition can be minimised with minimal performance penalty.
 class _DataWrapper {
+    protected:
+        std::size_t _pos = 0;
     public:
         virtual char get() = 0;
         virtual bool eof() = 0;
         virtual _DataWrapper& operator++() = 0;
         virtual _DataWrapper& operator--() = 0;
+        inline std::size_t pos();
+        inline void error(const std::string&);
+        inline void errorpos(const std::string&, int = -1);
 };
 
 // Wraps string to be accessed and parsed.
@@ -141,3 +147,11 @@ inline Value parse_string(_DataWrapper&);
 
 // Parses a JSON literal name (true, false or null).
 inline Value parse_literal_name(_DataWrapper&);
+
+// Error object for library.
+class JsonParseError : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// Common error messages.
+static std::string INVALID_JSON_DATA = "Invalid JSON data.";

@@ -1,6 +1,5 @@
 // Testing of the JSON parser to ensure it is functioning correctly.
 #include <functional>
-#include <iostream>
 #include <fstream>
 #include <string>
 #include <cassert>

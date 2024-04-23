@@ -212,6 +212,7 @@ Value parse_number(_DataWrapper& data) {
     bool decimal_point_seen = false;
     bool exponent_seen = false;
     bool exponent_empty = true;
+    bool exponent_sign_seen = false;
     bool exponent_negative = false;
     for (; !data.eof(); ++data) {
         char c = data.get();
@@ -255,11 +256,13 @@ Value parse_number(_DataWrapper& data) {
                 break;
             case Exponent:
                 // Possible chars: + (first only), - (first only), 0-9
-                if (exponent_empty && c == PLUS_SIGN) {
+                if (exponent_empty && c == PLUS_SIGN && !exponent_sign_seen) {
                     // Positive exponent, no effect since it is the default.
+                    exponent_sign_seen = true;
                     continue;
-                } else if (exponent_empty && c == MINUS_SIGN) {
+                } else if (exponent_empty && c == MINUS_SIGN && !exponent_sign_seen) {
                     exponent_negative = true;
+                    exponent_sign_seen = true;
                 } else if (isdigit(c)) {
                     exponent = exponent * 10 + (c - '0');
                     exponent_empty = false;

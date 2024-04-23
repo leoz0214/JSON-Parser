@@ -5,7 +5,18 @@
 #include <functional>
 #include <stdexcept>
 #include <cassert>
+#include <fstream>
+#include <filesystem>
 #include "../src/json.h"
+
+
+std::string get_destructive_test_files_folder() {
+    if (std::filesystem::directory_entry("testing").exists()) {
+        return "testing/destructive";
+    }
+    return "destructive";
+}
+const std::string FILES_FOLDER = get_destructive_test_files_folder();
 
 
 typedef std::function<void(JsonParseError)> ErrorHandler;
@@ -25,6 +36,20 @@ void string_test(const std::string& string, ErrorHandler error_callback = nullpt
 void check_correct_position(JsonParseError e, int pos) {
     std::cout << "Testing " << e.what() << '\n';
     assert(std::string(e.what()).find(" " + std::to_string(pos) + ":") != std::string::npos);
+}
+
+
+void file_test(const std::string& file_name, ErrorHandler error_callback = nullptr) {
+    std::ifstream file(FILES_FOLDER + "/" + file_name);
+    assert(file.is_open());
+    try {
+        parse_json(file);
+        throw std::runtime_error("Invalid stream accepted by parser.");
+    } catch (const JsonParseError& e) {
+        if (error_callback != nullptr) {
+            error_callback(e);
+        }
+    }
 }
 
 
@@ -81,5 +106,21 @@ int main() {
     });
     string_test("[[[[[[<)]]]]]]", [](JsonParseError e) {
         check_correct_position(e, 6);
+    });
+    string_test("1.05e+-2");
+
+    file_test("empty", [](JsonParseError e) {
+        assert(e.what() == INVALID_JSON_DATA);
+    });
+    file_test("invalid_literal");
+    file_test("invalid_number", [](JsonParseError e) {
+        check_correct_position(e, 4);
+    });
+    file_test("invalid_string", [](JsonParseError e) {
+        check_correct_position(e, 114);
+    });
+    file_test("precision", [](JsonParseError e) {
+        check_correct_position(e, 165);
+        assert(std::string(e.what()).find("comma") != std::string::npos);
     });
 }

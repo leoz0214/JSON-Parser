@@ -1,0 +1,5 @@
+{
+    "sender": "example@gmail.com",
+    "password": "***",
+    "recipients": ["a@gmail.com", "b@yahoo.com", "c@googlemail.com"],
+    "day_times": [["Friday", "2200""                              

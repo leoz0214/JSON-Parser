@@ -24,22 +24,31 @@ _StrWrapper::_StrWrapper(const std::string& data) {
     this->data = &data;
 }
 
+char _StrWrapper::peek() {
+    char c = this->data->operator[](this->_pos);
+    this->_eof = this->_pos == this->data->size();
+    return c;
+}
+
 char _StrWrapper::get() {
-    return this->data->operator[](this->_pos);
+    char c = this->data->operator[](this->_pos);
+    this->_eof = this->_pos == this->data->size();
+    this->_pos++;
+    return c;
 }
 
 bool _StrWrapper::eof() {
-    return this->_pos == this->data->size();
+    return this->_eof;
 }
 
-_StrWrapper& _StrWrapper::operator++() {
+void _StrWrapper::operator++() {
     this->_pos++;
-    return *this;
+    this->_eof = this->_pos == this->data->size();
 }
 
-_StrWrapper& _StrWrapper::operator--() {
+void _StrWrapper::operator--() {
     this->_pos--;
-    return *this;
+    this->_eof = false;
 }
 
 
@@ -47,30 +56,39 @@ _IstreamWrapper::_IstreamWrapper(std::istream& istream) {
     this->stream = &istream;
 }
 
+char _IstreamWrapper::peek() {
+    char c = this->stream->peek();
+    this->_eof = c == EOF;
+    return c;
+}
+
 char _IstreamWrapper::get() {
-    return this->stream->peek();
+    this->_pos++;
+    char c = this->stream->get();
+    this->_eof = c == EOF;
+    return c;
 }
 
 bool _IstreamWrapper::eof() {
-    return this->stream->peek() == EOF;
+    return this->_eof;
 }
 
-_IstreamWrapper& _IstreamWrapper::operator++() {
-    this->stream->get();
+void _IstreamWrapper::operator++() {
+    char c = this->stream->get();
     this->_pos++;
-    return *this;
+    this->_eof = c == EOF;
 }
 
-_IstreamWrapper& _IstreamWrapper::operator--() {
+void _IstreamWrapper::operator--() {
     this->stream->unget();
     this->_pos--;
-    return *this;
+    this->_eof = false;
 }
 
 
 // Parse any JSON value. It could be a number, string, literal, array or object.
 inline Value parse_value(_DataWrapper& data) {
-    char c = data.get();
+    char c = data.peek();
     if (c == STRING_QUOTES) {
         return parse_string(data);
     }
@@ -98,9 +116,13 @@ Value parse_array(_DataWrapper& data) {
     ++data; // Opening square bracket is known.
     Array array;
     bool expecting_comma = false;
-    for (; !data.eof(); ++data) {
-        char c = data.get();
+    while (true) {
+        char c = data.peek();
+        if (data.eof()) {
+            break;
+        }
         if (WHITESPACE.count(c)) {
+            ++data;
             continue;
         }
         if (expecting_comma) {
@@ -111,9 +133,11 @@ Value parse_array(_DataWrapper& data) {
                 case Structural::value_separator:
                     // Comma as expected.
                     expecting_comma = false;
+                    ++data;
                     continue;
                 case Structural::end_array:
                     // Alternatively, array can end here too.
+                    ++data;
                     return array;
                 default:
                     throw data.errorpos("Expected comma.");
@@ -125,6 +149,7 @@ Value parse_array(_DataWrapper& data) {
             if (!array.empty()) {
                 throw data.errorpos("Expected value.");
             }
+            ++data;
             return array;
         }
         array.push_back(parse_value(data));
@@ -140,9 +165,13 @@ Value parse_object(_DataWrapper& data) {
     enum ParsingPart {Name, Colon, Value, Comma};
     ParsingPart parsing_part = Name;
     String key;
-    for (; !data.eof(); ++data) {
-        char c = data.get();
+    while (true) {
+        char c = data.peek();
+        if (data.eof()) {
+            break;
+        }
         if (WHITESPACE.count(c)) {
+            ++data;
             continue;
         }
         switch (parsing_part) {
@@ -150,6 +179,7 @@ Value parse_object(_DataWrapper& data) {
                 // Allow for potential empty object.
                 if (object.empty() && STRUCTURAL_CHARS.count(c) && STRUCTURAL_CHARS[c] == Structural::end_object) {
                     // End of object successfully reached.
+                    ++data;
                     return object;
                 }  else if (c == STRING_QUOTES) {
                     // Deduce string key, ensuring not duplicate.
@@ -168,6 +198,7 @@ Value parse_object(_DataWrapper& data) {
                 if (!STRUCTURAL_CHARS.count(c) || STRUCTURAL_CHARS[c] != Structural::name_separator) {
                     throw data.errorpos("Expected colon.");
                 }
+                ++data;
                 break;
             case Value:
                 object[key] = parse_value(data);
@@ -179,12 +210,14 @@ Value parse_object(_DataWrapper& data) {
                 switch (STRUCTURAL_CHARS[c]) {
                     case Structural::end_object:
                         // Object ends here instead of another comma.
+                        ++data;
                         return object;
                     case Structural::value_separator:
                         break;
                     default:
                         throw data.errorpos("Expected comma.");
                 }
+                ++data;
                 break;
         }
         // To the next parsing part, cycling back to Name after Comma.
@@ -197,7 +230,7 @@ Value parse_object(_DataWrapper& data) {
 Value parse_number(_DataWrapper& data) {
     // Optional minus sign.
     std::size_t start_pos = data.pos();
-    bool negative = data.get() == MINUS_SIGN;
+    bool negative = data.peek() == MINUS_SIGN;
     if (negative) {
         ++data;
     }
@@ -214,8 +247,11 @@ Value parse_number(_DataWrapper& data) {
     bool exponent_empty = true;
     bool exponent_sign_seen = false;
     bool exponent_negative = false;
-    for (; !data.eof(); ++data) {
+    while (true) {
         char c = data.get();
+        if (data.eof()) {
+            break;
+        }
         switch (parsing_part) {
             case Integer:
                 // Possible chars: ., 0-9 (0 not first), e, E
@@ -306,94 +342,104 @@ inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
 }
 
 
+enum class StrParsingPart {normal, escape, unicode_escape};
 Value parse_string(_DataWrapper& data) {
     ++data; // Opening double quote.
     String result;
-    bool escape = false;
-    bool unicode_escape = false;
     int unicode_code_point = 0;
     int unicode_escape_chars = 0;
-    for (; !data.eof(); ++data) {
+    StrParsingPart parsing_part = StrParsingPart::normal;
+    while (true) {
         char c = data.get();
-        if (unicode_escape) {
-            // Handles Unicode escape character (\uXXXX).
-            if (!isxdigit(c)) {
-                throw data.errorpos("Invalid hex character in Unicode escape.");
-            }
-            c = toupper(c);
-            int decimal_value = (c >= 'A') ? (c - 'A' + 10) : (c - '0');
-            unicode_code_point = (unicode_code_point * 16) + decimal_value;
-            unicode_escape_chars++;
-            if (unicode_escape_chars == 4) {
-                // Done with the Unicode escape character.
-                // Convert into sequence of UTF-8 bytes.
-                // Only need to consider 1-3 bytes since range
-                // of Basic Multilingual Plane is [0, 0xFFFF].
-                if (unicode_code_point <= 0x007F) {
-                    // Just normal ASCII character - no special stuff.
-                    result.push_back(unicode_code_point);
-                } else if (unicode_code_point <= 0x07FF) {
-                    // Two bytes: 110xxxxx 10xxxxxx
-                    unsigned char byte1 = 0;
-                    unsigned char byte2 = 0;
-                    fill_utf8_byte(byte2, unicode_code_point, 6);
-                    fill_utf8_byte(byte1, unicode_code_point, 5);
-                    byte1 |= 0b11000000;
-                    byte2 |= 0b10000000;
-                    result.append({char(byte1), char(byte2)});
-                } else {
-                    // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
-                    unsigned char byte1 = 0;
-                    unsigned char byte2 = 0;
-                    unsigned char byte3 = 0;
-                    fill_utf8_byte(byte3, unicode_code_point, 6);
-                    fill_utf8_byte(byte2, unicode_code_point, 6);
-                    fill_utf8_byte(byte1, unicode_code_point, 4);
-                    byte1 |= 0b11100000;
-                    byte2 |= 0b10000000;
-                    byte3 |= 0b10000000;
-                    result.append({char(byte1), char(byte2), char(byte3)});
+        if (data.eof()) {
+            break;
+        }
+        switch (parsing_part) {
+            case StrParsingPart::normal:
+                // Handle normal character.
+                switch (c) {
+                    case STRING_QUOTES:
+                        // The string has been closed.
+                        return result;
+                    case BACKSLASH:
+                        // Start of an escaped character.
+                        parsing_part = StrParsingPart::escape;
+                        break;
+                    default:
+                        // Just a normal character - append.
+                        result.push_back(c);
                 }
-                unicode_escape = false;
-                unicode_code_point = 0;
-                unicode_escape_chars = 0;
-            }
-        } else if (escape) {
-            // Handle escape character without yet knowing what is to come.
-            if (ESCAPE_CHARS.count(c)) {
-                result.push_back(ESCAPE_CHARS[c]);
-            } else if (c == UNICODE_ESCAPE) {
-                unicode_escape = true;
-            } else {
-                throw data.errorpos("Invalid escape character.");
-            }
-            escape = false; // Either escape character done, or transfer control to Unicode escape.
-        } else {
-            // Handle normal character.
-            switch (c) {
-                case STRING_QUOTES:
-                    // The string has been closed.
-                    return result;
-                case BACKSLASH:
-                    // Start of an escaped character.
-                    escape = true;
-                    break;
-                default:
-                    // Just a normal character - append.
-                    result.push_back(c);
-            }
+                break;
+            case StrParsingPart::escape:
+                // Handle escape character without yet knowing what is to come.
+                if (ESCAPE_CHARS.count(c)) {
+                    parsing_part = StrParsingPart::normal;
+                    result.push_back(ESCAPE_CHARS[c]);
+                } else if (c == UNICODE_ESCAPE) {
+                    parsing_part = StrParsingPart::unicode_escape;
+                } else {
+                    throw data.errorpos("Invalid escape character.", data.pos() - 1);
+                }
+                break;
+            case StrParsingPart::unicode_escape:
+                // Handles Unicode escape character (\uXXXX).
+                if (!isxdigit(c)) {
+                    throw data.errorpos("Invalid hex character in Unicode escape.", data.pos() - 1);
+                }
+                c = toupper(c);
+                int decimal_value = (c >= 'A') ? (c - 'A' + 10) : (c - '0');
+                unicode_code_point = (unicode_code_point * 16) + decimal_value;
+                unicode_escape_chars++;
+                if (unicode_escape_chars == 4) {
+                    // Done with the Unicode escape character.
+                    // Convert into sequence of UTF-8 bytes.
+                    // Only need to consider 1-3 bytes since range
+                    // of Basic Multilingual Plane is [0, 0xFFFF].
+                    if (unicode_code_point <= 0x007F) {
+                        // Just normal ASCII character - no special stuff.
+                        result.push_back(unicode_code_point);
+                    } else if (unicode_code_point <= 0x07FF) {
+                        // Two bytes: 110xxxxx 10xxxxxx
+                        unsigned char byte1 = 0;
+                        unsigned char byte2 = 0;
+                        fill_utf8_byte(byte2, unicode_code_point, 6);
+                        fill_utf8_byte(byte1, unicode_code_point, 5);
+                        byte1 |= 0b11000000;
+                        byte2 |= 0b10000000;
+                        result.append({char(byte1), char(byte2)});
+                    } else {
+                        // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
+                        unsigned char byte1 = 0;
+                        unsigned char byte2 = 0;
+                        unsigned char byte3 = 0;
+                        fill_utf8_byte(byte3, unicode_code_point, 6);
+                        fill_utf8_byte(byte2, unicode_code_point, 6);
+                        fill_utf8_byte(byte1, unicode_code_point, 4);
+                        byte1 |= 0b11100000;
+                        byte2 |= 0b10000000;
+                        byte3 |= 0b10000000;
+                        result.append({char(byte1), char(byte2), char(byte3)});
+                    }
+                    parsing_part = StrParsingPart::normal;
+                    unicode_code_point = 0;
+                    unicode_escape_chars = 0;
+                }
         }
     }
     // End of JSON without closing double quote - erroneous.
-    throw data.errorpos("Unterminated string literal.");
+    throw data.errorpos("Unterminated string literal.", data.pos() - 1);
 }
 
 
 Value parse_literal_name(_DataWrapper& data) {
     std::string literal_name = "";
     std::size_t start_pos = data.pos();
-    for (; !data.eof(); ++data) {
-        literal_name += data.get();
+    while (true) {
+        char c = data.get();
+        if (data.eof()) {
+            break;
+        }
+        literal_name += c;
         if (literal_name.size() > 5) {
             // false is the longest literal, if still going, invalid...
             break;
@@ -415,9 +461,14 @@ Value parse_literal_name(_DataWrapper& data) {
 Value parse_json(_DataWrapper& data) {
     Value result;
     bool parsed = false;
-    for (; !data.eof(); ++data) {
-        if (WHITESPACE.count(data.get())) {
+    while (true) {
+        char c = data.peek();
+        if (data.eof()) {
+            break;
+        }
+        if (WHITESPACE.count(c)) {
             // Ignore insignificant whitespace.
+            ++data;
             continue;
         }
         if (parsed) {

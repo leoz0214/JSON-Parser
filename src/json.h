@@ -95,11 +95,13 @@ class JsonParseError : public std::runtime_error {
 class _DataWrapper {
     protected:
         std::size_t _pos = 0;
+        bool _eof = false;
     public:
+        virtual char peek() = 0;
         virtual char get() = 0;
         virtual bool eof() = 0;
-        virtual _DataWrapper& operator++() = 0;
-        virtual _DataWrapper& operator--() = 0;
+        virtual void operator++() = 0;
+        virtual void operator--() = 0;
         inline std::size_t pos();
         inline JsonParseError error(const std::string&);
         inline JsonParseError errorpos(const std::string&, int = -1);
@@ -112,10 +114,11 @@ class _StrWrapper : public _DataWrapper {
         std::size_t index = 0;
     public:
         _StrWrapper(const std::string&);
+        char peek() override;
         char get() override;
         bool eof() override;
-        _StrWrapper& operator++() override;
-        _StrWrapper& operator--() override;
+        void operator++() override;
+        void operator--() override;
 };
 
 // Wraps input stream to be accessed and parsed.
@@ -124,10 +127,11 @@ class _IstreamWrapper : public _DataWrapper {
         std::istream* stream;
     public:
         _IstreamWrapper(std::istream&);
+        char peek() override;
         char get() override;
         bool eof() override;
-        _IstreamWrapper& operator++() override;
-        _IstreamWrapper& operator--() override;
+        void operator++() override;
+        void operator--() override;
 };
 
 // Parses a string object representing the JSON data.

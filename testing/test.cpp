@@ -1,4 +1,5 @@
 // Testing of the JSON parser to ensure it is functioning correctly.
+#include <iostream>
 #include <functional>
 #include <fstream>
 #include <string>
@@ -21,6 +22,7 @@ const std::string FILES_FOLDER = get_test_files_folder();
 
 typedef std::function<void(const Value&)> TestFunction;
 void string_test(const std::string& string, TestFunction function) {
+    std::cout << string << '\n';
     function(parse_json(string));
 }
 

@@ -10,6 +10,9 @@
 #include "../src/json.h"
 
 
+using namespace json;
+
+
 std::string get_destructive_test_files_folder() {
     if (std::filesystem::directory_entry("testing").exists()) {
         return "testing/destructive";
@@ -22,7 +25,7 @@ const std::string FILES_FOLDER = get_destructive_test_files_folder();
 typedef std::function<void(JsonParseError)> ErrorHandler;
 void string_test(const std::string& string, ErrorHandler error_callback = nullptr) {
     try {
-        parse_json(string);
+        parse(string);
         // This should not run or else the parser accepts erroneous data.
         throw std::runtime_error("Invalid string accepted by parser.");
     } catch (const JsonParseError& e) {
@@ -43,7 +46,7 @@ void file_test(const std::string& file_name, ErrorHandler error_callback = nullp
     std::ifstream file(FILES_FOLDER + "/" + file_name);
     assert(file.is_open());
     try {
-        parse_json(file);
+        parse(file);
         throw std::runtime_error("Invalid stream accepted by parser.");
     } catch (const JsonParseError& e) {
         if (error_callback != nullptr) {
@@ -88,9 +91,6 @@ int main() {
     });
     string_test("{{}: {{{{{}}}}}}", [](JsonParseError e) {
         check_correct_position(e, 1);
-    });
-    string_test("{\"abc\": true, \"abc\": false}", [](JsonParseError e) {
-        check_correct_position(e, 14);
     });
     string_test(" {\" \"[1,2,3]} ", [](JsonParseError e) {
         check_correct_position(e, 5);

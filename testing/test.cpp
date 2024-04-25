@@ -11,6 +11,9 @@
 #include "../src/json.h"
 
 
+using namespace json;
+
+
 std::string get_test_files_folder() {
     if (std::filesystem::directory_entry("testing").exists()) {
         return "testing/files";
@@ -23,14 +26,14 @@ const std::string FILES_FOLDER = get_test_files_folder();
 typedef std::function<void(const Value&)> TestFunction;
 void string_test(const std::string& string, TestFunction function) {
     std::cout << string << '\n';
-    function(parse_json(string));
+    function(parse(string));
 }
 
 
 void file_test(const std::string& file_name, TestFunction function) {
     std::ifstream file(FILES_FOLDER + "/" + file_name);
     assert(file.is_open());
-    function(parse_json(file));
+    function(parse(file));
 }
 
 
@@ -62,7 +65,7 @@ int main() {
         const Object& obj = std::get<Object>(value);
         assert(std::get<Number>(obj.at("123")) == 456);
         assert(std::get<String>(obj.at("Hello")) == "World!");
-        assert((value == parse_json("{\"Hello\": \"World!\",\"123\":456}")));
+        assert((value == parse("{\"Hello\": \"World!\",\"123\":456}")));
     });
 
     file_test("basic.json", [](const Value& value) {

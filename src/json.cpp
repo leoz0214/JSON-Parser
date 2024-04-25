@@ -3,6 +3,8 @@
 #include "json.h"
 
 
+namespace json {
+
 std::size_t  _DataWrapper::pos() {
     return this->_pos;
 }
@@ -87,32 +89,26 @@ void _IstreamWrapper::operator--() {
 
 
 // Parse any JSON value. It could be a number, string, literal, array or object.
-inline Value parse_value(_DataWrapper& data) {
+inline Value _parse_value(_DataWrapper& data) {
     char c = data.peek();
-    if (c == STRING_QUOTES) {
-        return parse_string(data);
+    switch (c) {
+        case STRING_QUOTES:
+            return _parse_string(data);
+        case BEGIN_ARRAY:
+            return _parse_array(data);
+        case BEGIN_OBJECT:
+            return _parse_object(data);
+        default:
+            if (c == MINUS_SIGN || isdigit(c)) {
+                return _parse_number(data);
+            }
+            // It can be nothing else - either literal name or invalid.
+            return _parse_literal_name(data);
     }
-    if (c == MINUS_SIGN || isdigit(c)) {
-        return parse_number(data);
-    }
-    if (STRUCTURAL_CHARS.count(c)) {
-        // In this context, either array/object opening is expected.
-        // Anything else is erroneous.
-        switch (STRUCTURAL_CHARS[c]) {
-            case Structural::begin_array:
-                return parse_array(data);
-            case Structural::begin_object:
-                return parse_object(data);
-            default:
-                throw data.errorpos("Invalid structural character.");
-        }
-    }
-    // It can be nothing else - either literal name or invalid.
-    return parse_literal_name(data);
 }
 
 
-Value parse_array(_DataWrapper& data) {
+Value _parse_array(_DataWrapper& data) {
     ++data; // Opening square bracket is known.
     Array array;
     bool expecting_comma = false;
@@ -126,16 +122,13 @@ Value parse_array(_DataWrapper& data) {
             continue;
         }
         if (expecting_comma) {
-            if (!STRUCTURAL_CHARS.count(c)) {
-                throw data.errorpos("Expected comma.");
-            }
-            switch (STRUCTURAL_CHARS[c]) {
-                case Structural::value_separator:
+            switch (c) {
+                case VALUE_SEPARATOR:
                     // Comma as expected.
                     expecting_comma = false;
                     ++data;
                     continue;
-                case Structural::end_array:
+                case END_ARRAY:
                     // Alternatively, array can end here too.
                     ++data;
                     return array;
@@ -143,27 +136,26 @@ Value parse_array(_DataWrapper& data) {
                     throw data.errorpos("Expected comma.");
             }
         }
-        if (STRUCTURAL_CHARS.count(c) && STRUCTURAL_CHARS[c] == Structural::end_array) {
-            // Just had a comma.
-            // Must not end on comma, but array can be empty.
+        if (c == END_ARRAY) {
+            // Just had a comma. Must not end on comma, but array can be empty.
             if (!array.empty()) {
                 throw data.errorpos("Expected value.");
             }
             ++data;
             return array;
         }
-        array.push_back(parse_value(data));
+        array.push_back(_parse_value(data));
         expecting_comma = true;
     }
     throw data.errorpos("Array not closed.");
 }
 
 
-Value parse_object(_DataWrapper& data) {
+Value _parse_object(_DataWrapper& data) {
     ++data; // Opening curly bracket is known.
     Object object;
     enum ParsingPart {Name, Colon, Value, Comma};
-    ParsingPart parsing_part = Name;
+    int parsing_part = Name;
     String key;
     while (true) {
         char c = data.peek();
@@ -176,44 +168,36 @@ Value parse_object(_DataWrapper& data) {
         }
         switch (parsing_part) {
             case Name:
-                // Allow for potential empty object.
-                if (object.empty() && STRUCTURAL_CHARS.count(c) && STRUCTURAL_CHARS[c] == Structural::end_object) {
+                if (c == STRING_QUOTES) {
+                    // Deduce string key ready to be paired to corresponding value.
+                    // Retain it to map it to the corresponding value to come.
+                    // Allow duplicate keys but will overwrite existing value.
+                    key = std::get<String>(_parse_string(data));
+                } else if (object.empty() && c == END_OBJECT) {
                     // End of object successfully reached.
                     ++data;
                     return object;
-                }  else if (c == STRING_QUOTES) {
-                    // Deduce string key, ensuring not duplicate.
-                    // Retain it to map it to the corresponding value to come.
-                    std::size_t key_start_pos = data.pos();
-                    key = std::get<String>(parse_string(data));
-                    if (object.count(key)) {
-                        // Duplicate key, typically disallowed in JSON.
-                        throw data.errorpos("Duplicate key disallowed.", key_start_pos);
-                    }
                 } else {
                     throw data.errorpos("Expected string literal as object key.");
                 }
                 break;
             case Colon:
-                if (!STRUCTURAL_CHARS.count(c) || STRUCTURAL_CHARS[c] != Structural::name_separator) {
+                if (c != NAME_SEPARATOR) {
                     throw data.errorpos("Expected colon.");
                 }
                 ++data;
                 break;
             case Value:
-                object[key] = parse_value(data);
+                object[key] = _parse_value(data);
                 break;
             case Comma:
-                if (!STRUCTURAL_CHARS.count(c)) {
-                    throw data.errorpos("Expected comma.");
-                }
-                switch (STRUCTURAL_CHARS[c]) {
-                    case Structural::end_object:
+                switch (c) {
+                    case VALUE_SEPARATOR:
+                        break;
+                    case END_OBJECT:
                         // Object ends here instead of another comma.
                         ++data;
                         return object;
-                    case Structural::value_separator:
-                        break;
                     default:
                         throw data.errorpos("Expected comma.");
                 }
@@ -221,13 +205,13 @@ Value parse_object(_DataWrapper& data) {
                 break;
         }
         // To the next parsing part, cycling back to Name after Comma.
-        parsing_part = (ParsingPart)((parsing_part + 1) % 4);
+        parsing_part = (parsing_part + 1) % 4;
     }
     throw data.errorpos("Object not closed.");
 }
 
 
-Value parse_number(_DataWrapper& data) {
+Value _parse_number(_DataWrapper& data) {
     // Optional minus sign.
     std::size_t start_pos = data.pos();
     bool negative = data.peek() == MINUS_SIGN;
@@ -343,7 +327,7 @@ inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
 
 
 enum class StrParsingPart {normal, escape, unicode_escape};
-Value parse_string(_DataWrapper& data) {
+Value _parse_string(_DataWrapper& data) {
     ++data; // Opening double quote.
     String result;
     int unicode_code_point = 0;
@@ -431,7 +415,7 @@ Value parse_string(_DataWrapper& data) {
 }
 
 
-Value parse_literal_name(_DataWrapper& data) {
+Value _parse_literal_name(_DataWrapper& data) {
     std::string literal_name = "";
     std::size_t start_pos = data.pos();
     while (true) {
@@ -458,7 +442,7 @@ Value parse_literal_name(_DataWrapper& data) {
 }
 
 
-Value parse_json(_DataWrapper& data) {
+Value parse(_DataWrapper& data) {
     Value result;
     bool parsed = false;
     while (true) {
@@ -475,7 +459,7 @@ Value parse_json(_DataWrapper& data) {
             // Cannot have second part of the toplevel data... error
             throw data.error(INVALID_JSON_DATA);
         }
-        result = parse_value(data);
+        result = _parse_value(data);
         parsed = true;
     }
     if (!parsed) {
@@ -486,13 +470,15 @@ Value parse_json(_DataWrapper& data) {
 }
 
 
-Value parse_json(const std::string& string) {
+Value parse(const std::string& string) {
     _StrWrapper wrapper(string);
-    return parse_json(wrapper);
+    return parse(wrapper);
 }
 
 
-Value parse_json(std::istream& istream) {
+Value parse(std::istream& istream) {
     _IstreamWrapper wrapper(istream);
-    return parse_json(wrapper);
+    return parse(wrapper);
+}
+
 }

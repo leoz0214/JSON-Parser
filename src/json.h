@@ -11,20 +11,16 @@
 #include <vector>
 
 
-// Structural characters in JSON.
-enum class Structural {
-    begin_array, begin_object, end_array, end_object,
-    name_separator, value_separator
-};
+// Use sensible namespace to keep module contents separate from global namespace.
+namespace json {
 
-static std::map<char, Structural> STRUCTURAL_CHARS = {
-    {'[', Structural::begin_array},
-    {'{', Structural::begin_object},
-    {']', Structural::end_array},
-    {'}', Structural::end_object},
-    {':', Structural::name_separator},
-    {',', Structural::value_separator}
-};
+// Structural characters in JSON.
+const char BEGIN_ARRAY = '[';
+const char BEGIN_OBJECT = '{';
+const char END_ARRAY = ']';
+const char END_OBJECT = '}';
+const char NAME_SEPARATOR = ':';
+const char VALUE_SEPARATOR = ',';
 
 // Spaces, tabs, new lines, carriage return
 static std::set<char> WHITESPACE = {0x20, 0x09, 0x0A, 0x0D};
@@ -78,7 +74,7 @@ typedef double Number;
 typedef std::string String;
 // Represent JSON booleans in the following type.
 typedef bool Boolean;
-// Represent JSON value of any type (monostate -> null).
+// Represent JSON value of any type.
 class Value : public std::variant<Null, Object, Array, Number, String, Boolean> {
     using std::variant<Null, Object, Array, Number, String, Boolean>::variant;
 };
@@ -136,24 +132,26 @@ class _IstreamWrapper : public _DataWrapper {
 
 // Parses a string object representing the JSON data.
 // Will raise an exception if the JSON data is invalid.
-Value parse_json(_DataWrapper&);
-Value parse_json(const std::string&);
-Value parse_json(std::istream&);
+Value parse(_DataWrapper&);
+Value parse(const std::string&);
+Value parse(std::istream&);
 
 // Parses a JSON array.
-Value parse_array(_DataWrapper&);
+Value _parse_array(_DataWrapper&);
 
 // Parses a JSON object.
-Value parse_object(_DataWrapper&);
+Value _parse_object(_DataWrapper&);
 
 // Parses a JSON number.
-inline Value parse_number(_DataWrapper&);
+inline Value _parse_number(_DataWrapper&);
 
 // Parses a JSON string literal (not the JSON string itself).
-inline Value parse_string(_DataWrapper&);
+inline Value _parse_string(_DataWrapper&);
 
 // Parses a JSON literal name (true, false or null).
-inline Value parse_literal_name(_DataWrapper&);
+inline Value _parse_literal_name(_DataWrapper&);
 
 // Common error messages.
 static std::string INVALID_JSON_DATA = "Invalid JSON data.";
+
+}

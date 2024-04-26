@@ -67,6 +67,10 @@ int main() {
         assert(std::get<String>(obj.at("Hello")) == "World!");
         assert((value == parse("{\"Hello\": \"World!\",\"123\":456}")));
     });
+    // In this implementation, allow duplicate keys.
+    string_test("{\"a\": 25, \"b\": 24, \"a\": 3.14}", [](const Value& value) {
+        assert(std::get<Number>(std::get<Object>(value).at("a")) == 3.14);
+    });
 
     file_test("basic.json", [](const Value& value) {
         auto arr = std::get<Array>(value);

@@ -52,14 +52,6 @@ const char DECIMAL_POINT = '.';
 // Numbers may contain an exponent part (scientific notation).
 const char EXPONENT = 'e';
 
-// Valid literal names.
-enum class LiteralName {true_, false_, null};
-static std::map<std::string, LiteralName> LITERAL_NAMES = {
-    {"true", LiteralName::true_},
-    {"false", LiteralName::false_},
-    {"null", LiteralName::null}
-};
-
 
 class Value;
 // NULL
@@ -80,6 +72,14 @@ class Value : public std::variant<Null, Object, Array, Number, String, Boolean> 
 };
 
 
+// Valid literal names.
+static std::map<std::string, Value> LITERAL_NAMES = {
+    {"true", true},
+    {"false", false},
+    {"null", Null()}
+};
+
+
 // Error object for library.
 class JsonParseError : public std::runtime_error {
     using std::runtime_error::runtime_error;
@@ -95,10 +95,10 @@ class _DataWrapper {
     public:
         virtual char peek() = 0;
         virtual char get() = 0;
-        virtual bool eof() = 0;
         virtual void operator++() = 0;
         virtual void operator--() = 0;
         inline std::size_t pos();
+        inline bool eof();
         inline JsonParseError error(const std::string&);
         inline JsonParseError errorpos(const std::string&, int = -1);
 };
@@ -112,7 +112,6 @@ class _StrWrapper : public _DataWrapper {
         _StrWrapper(const std::string&);
         char peek() override;
         char get() override;
-        bool eof() override;
         void operator++() override;
         void operator--() override;
 };
@@ -125,7 +124,6 @@ class _IstreamWrapper : public _DataWrapper {
         _IstreamWrapper(std::istream&);
         char peek() override;
         char get() override;
-        bool eof() override;
         void operator++() override;
         void operator--() override;
 };

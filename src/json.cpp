@@ -9,6 +9,10 @@ std::size_t  _DataWrapper::pos() {
     return this->_pos;
 }
 
+bool _DataWrapper::eof() {
+    return this->_eof;
+}
+
 JsonParseError _DataWrapper::error(const std::string& what) {
     return JsonParseError(what);
 }
@@ -39,10 +43,6 @@ char _StrWrapper::get() {
     return c;
 }
 
-bool _StrWrapper::eof() {
-    return this->_eof;
-}
-
 void _StrWrapper::operator++() {
     this->_pos++;
     this->_eof = this->_pos == this->data->size();
@@ -69,10 +69,6 @@ char _IstreamWrapper::get() {
     char c = this->stream->get();
     this->_eof = c == EOF;
     return c;
-}
-
-bool _IstreamWrapper::eof() {
-    return this->_eof;
 }
 
 void _IstreamWrapper::operator++() {
@@ -154,7 +150,7 @@ Value _parse_array(_DataWrapper& data) {
 Value _parse_object(_DataWrapper& data) {
     ++data; // Opening curly bracket is known.
     Object object;
-    enum ParsingPart {Name, Colon, Value, Comma};
+    enum ObjectParsingPart {Name, Colon, Value, Comma};
     int parsing_part = Name;
     String key;
     while (true) {
@@ -167,11 +163,11 @@ Value _parse_object(_DataWrapper& data) {
             continue;
         }
         switch (parsing_part) {
-            case Name:
+            case ObjectParsingPart::Name:
                 if (c == STRING_QUOTES) {
                     // Deduce string key ready to be paired to corresponding value.
-                    // Retain it to map it to the corresponding value to come.
-                    // Allow duplicate keys but will overwrite existing value.
+                    // Retain it in order to map it to the corresponding value to come.
+                    // Allow duplicate keys (leniency) but will overwrite existing value.
                     key = std::get<String>(_parse_string(data));
                 } else if (object.empty() && c == END_OBJECT) {
                     // End of object successfully reached.
@@ -181,16 +177,16 @@ Value _parse_object(_DataWrapper& data) {
                     throw data.errorpos("Expected string literal as object key.");
                 }
                 break;
-            case Colon:
+            case ObjectParsingPart::Colon:
                 if (c != NAME_SEPARATOR) {
                     throw data.errorpos("Expected colon.");
                 }
                 ++data;
                 break;
-            case Value:
+            case ObjectParsingPart::Value:
                 object[key] = _parse_value(data);
                 break;
-            case Comma:
+            case ObjectParsingPart::Comma:
                 switch (c) {
                     case VALUE_SEPARATOR:
                         break;
@@ -211,6 +207,7 @@ Value _parse_object(_DataWrapper& data) {
 }
 
 
+enum class NumberParsingPart {Integer, Fraction, Exponent};
 Value _parse_number(_DataWrapper& data) {
     // Optional minus sign.
     std::size_t start_pos = data.pos();
@@ -222,8 +219,7 @@ Value _parse_number(_DataWrapper& data) {
     double fractional_part = 0;
     int fractional_digits = 0;
     double exponent = 0;
-    enum ParsingPart {Integer, Fraction, Exponent};
-    ParsingPart parsing_part = Integer;
+    NumberParsingPart parsing_part = NumberParsingPart::Integer;
     bool leading_zero = false;
     bool integer_part_empty = true;
     bool decimal_point_seen = false;
@@ -237,11 +233,11 @@ Value _parse_number(_DataWrapper& data) {
             break;
         }
         switch (parsing_part) {
-            case Integer:
-                // Possible chars: ., 0-9 (0 not first), e, E
+            case NumberParsingPart::Integer:
+                // Possible chars: ., 0-9 (no insignificant 0s), e, E
                 if (c == DECIMAL_POINT) {
                     decimal_point_seen = true;
-                    parsing_part = Fraction;
+                    parsing_part = NumberParsingPart::Fraction;
                 } else if (isdigit(c)) {
                     if (c == '0' && integer_part_empty) {
                         // (Possibly) Insignificant leading 0.
@@ -255,13 +251,13 @@ Value _parse_number(_DataWrapper& data) {
                 } else if (tolower(c) == EXPONENT) {
                     // Early exponent without fractional part.
                     exponent_seen = true;
-                    parsing_part = Exponent;
+                    parsing_part = NumberParsingPart::Exponent;
                 } else {
                     // Unrecognised character - assume end of number.
                     goto end_of_number;
                 }
                 break;
-            case Fraction:
+            case NumberParsingPart::Fraction:
                 // Possible chars: 0-9, e, E
                 if (isdigit(c)) {
                     fractional_digits++;
@@ -269,12 +265,12 @@ Value _parse_number(_DataWrapper& data) {
                     fractional_part += (c - '0') * std::pow(10, -fractional_digits);
                 } else if (tolower(c) == EXPONENT) {
                     exponent_seen = true;
-                    parsing_part = Exponent;
+                    parsing_part = NumberParsingPart::Exponent;
                 } else {
                     goto end_of_number;
                 }
                 break;
-            case Exponent:
+            case NumberParsingPart::Exponent:
                 // Possible chars: + (first only), - (first only), 0-9
                 if (exponent_empty && c == PLUS_SIGN && !exponent_sign_seen) {
                     // Positive exponent, no effect since it is the default.
@@ -320,26 +316,27 @@ Value _parse_number(_DataWrapper& data) {
 // Mutates the byte (fills it in) and code point.
 inline void fill_utf8_byte(unsigned char& byte, int& code_point, int count) {
     for (int i = 0; i < count; ++i) {
+        // Sets ith least significant bit to current LSB of code point.
         byte |= (code_point & 1) << i;
         code_point >>= 1;
     }
 }
 
 
-enum class StrParsingPart {normal, escape, unicode_escape};
+enum class StringParsingPart {normal, escape, unicode_escape};
 Value _parse_string(_DataWrapper& data) {
     ++data; // Opening double quote.
     String result;
     int unicode_code_point = 0;
     int unicode_escape_chars = 0;
-    StrParsingPart parsing_part = StrParsingPart::normal;
+    StringParsingPart parsing_part = StringParsingPart::normal;
     while (true) {
         char c = data.get();
         if (data.eof()) {
             break;
         }
         switch (parsing_part) {
-            case StrParsingPart::normal:
+            case StringParsingPart::normal:
                 // Handle normal character.
                 switch (c) {
                     case STRING_QUOTES:
@@ -347,25 +344,25 @@ Value _parse_string(_DataWrapper& data) {
                         return result;
                     case BACKSLASH:
                         // Start of an escaped character.
-                        parsing_part = StrParsingPart::escape;
+                        parsing_part = StringParsingPart::escape;
                         break;
                     default:
                         // Just a normal character - append.
                         result.push_back(c);
                 }
                 break;
-            case StrParsingPart::escape:
+            case StringParsingPart::escape:
                 // Handle escape character without yet knowing what is to come.
                 if (ESCAPE_CHARS.count(c)) {
-                    parsing_part = StrParsingPart::normal;
+                    parsing_part = StringParsingPart::normal;
                     result.push_back(ESCAPE_CHARS[c]);
                 } else if (c == UNICODE_ESCAPE) {
-                    parsing_part = StrParsingPart::unicode_escape;
+                    parsing_part = StringParsingPart::unicode_escape;
                 } else {
                     throw data.errorpos("Invalid escape character.", data.pos() - 1);
                 }
                 break;
-            case StrParsingPart::unicode_escape:
+            case StringParsingPart::unicode_escape:
                 // Handles Unicode escape character (\uXXXX).
                 if (!isxdigit(c)) {
                     throw data.errorpos("Invalid hex character in Unicode escape.", data.pos() - 1);
@@ -404,7 +401,7 @@ Value _parse_string(_DataWrapper& data) {
                         byte3 |= 0b10000000;
                         result.append({char(byte1), char(byte2), char(byte3)});
                     }
-                    parsing_part = StrParsingPart::normal;
+                    parsing_part = StringParsingPart::normal;
                     unicode_code_point = 0;
                     unicode_escape_chars = 0;
                 }
@@ -429,13 +426,7 @@ Value _parse_literal_name(_DataWrapper& data) {
             break;
         }
         if (LITERAL_NAMES.count(literal_name)) {
-            switch (LITERAL_NAMES[literal_name]) {
-                case LiteralName::true_:
-                    return true;
-                case LiteralName::false_:
-                    return false;
-            }
-            return Null();
+            return LITERAL_NAMES[literal_name];
         }
     }
     throw data.errorpos("Invalid literal.", start_pos);

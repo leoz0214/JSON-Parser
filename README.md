@@ -9,7 +9,7 @@ JSON is very dynamic whereas C++ is relatively rigid. Nonetheless, powerful usag
 Features of this mini C++ JSON parser:
 - Follows the **standard**: https://datatracker.ietf.org/doc/html/rfc8259
 - Parses JSON from a `std::string` object.
-- Parses JSON from a `std::ifstream` stream (any valid standard C++ input stream, including file/string streams).
+- Parses JSON from a `std::istream` stream (any valid standard C++ input stream, including file/string streams).
 - Correctly parses and stores JSON objects, arrays, numbers, strings and literals.
 - Provides a solid **error handling** scheme, including information on error positions where possible.
 - Can easily check two JSON objects for **equality**.
@@ -18,7 +18,7 @@ Features of this mini C++ JSON parser:
 ## Usage
 The code has proven to work on **Windows 10, g++ v12.1.0, C++17**. However, there is no known use of implementation-defined behaviour nor OS-specific behaviour. It is expected the code should compile on **any reasonable OS and conforming compiler, with C++17 minimum**.
 
-Simply include the `json.h` header in your project and compile with the `json.cpp` file bundled, and you will be set. The parser does speed up with optimisations enabled.
+Simply include the `json.h` header in your project and compile with the `json.cpp` file bundled, and you will be set. The parser does speed up with optimisations enabled during compilation.
 
 To explore how to use the code, and how the code handles special JSON cases such as duplicate object keys, refer to [USAGE.md](USAGE.md)
 

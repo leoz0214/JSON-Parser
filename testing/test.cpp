@@ -23,7 +23,7 @@ std::string get_test_files_folder() {
 const std::string FILES_FOLDER = get_test_files_folder();
 
 
-typedef std::function<void(const Value&)> TestFunction;
+typedef std::function<void(const json::Value&)> TestFunction;
 void string_test(const std::string& string, TestFunction function) {
     std::cout << string << '\n';
     function(parse(string));
@@ -38,7 +38,7 @@ void file_test(const std::string& file_name, TestFunction function) {
 
 
 int main() {
-    string_test("    true    ", [](const Value& value) {
+    string_test("    true    ", [](const json::Value& value) {
         assert(std::get<Boolean>(value) == true);
     });
     string_test("[]", [](const Value& value) {

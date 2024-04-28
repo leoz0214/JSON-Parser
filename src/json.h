@@ -149,7 +149,6 @@ inline Value _parse_string(_DataWrapper&);
 // Parses a JSON literal name (true, false or null).
 inline Value _parse_literal_name(_DataWrapper&);
 
-// Common error messages.
 static std::string INVALID_JSON_DATA = "Invalid JSON data.";
 
 }

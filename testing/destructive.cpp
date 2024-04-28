@@ -57,7 +57,7 @@ void file_test(const std::string& file_name, ErrorHandler error_callback = nullp
 
 
 int main() {
-    string_test("       ", [](JsonParseError e) {
+    string_test("       ", [](json::JsonParseError e) {
         assert(e.what() == INVALID_JSON_DATA);
     });
     string_test("[1, 2,3][0]",  [](JsonParseError e) {
